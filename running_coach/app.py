@@ -13,7 +13,7 @@ from . import dreeve, dreeve_mcp, weather
 from .bot import build_bot
 from .config import UTC, settings
 
-logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper(), format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+logging.basicConfig(level=(os.getenv("LOG_LEVEL") or "INFO").strip().upper(), format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logging.getLogger("httpx").setLevel(logging.WARNING)   # sinon une ligne par long-polling Telegram
 logger = logging.getLogger("running_coach")
 

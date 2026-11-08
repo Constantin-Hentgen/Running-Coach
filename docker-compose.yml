@@ -3,17 +3,53 @@ services:
     build: .
     container_name: running-coach
     restart: unless-stopped
-    # Configuration (voir .env.example), selon le mode de déploiement :
-    # - docker compose en local : fichier .env à côté de ce fichier ;
-    # - Portainer (stack depuis un dépôt Git) : variables saisies dans l'UI du stack,
-    #   que Portainer écrit dans stack.env.
-    # Les deux sont facultatifs : seul celui qui existe est chargé.
-    env_file:
-      - path: .env
-        required: false
-      - path: stack.env
-        required: false
+    # Configuration : chaque variable est lue par interpolation ${VAR}, ce qui marche partout :
+    # - docker compose en local : lues dans le fichier .env à côté de ce fichier ;
+    # - Portainer (stack depuis un dépôt Git) : variables saisies dans l'UI du stack.
+    # Une variable absente arrive vide et prend la valeur par défaut du code (voir .env.example).
+    # Les lignes parasites (vides, commentaires) de l'UI Portainer sont ignorées.
     environment:
+      # Anthropic
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CLAUDE_MODEL: ${CLAUDE_MODEL:-}
+      CLAUDE_MAX_TOKENS: ${CLAUDE_MAX_TOKENS:-}
+      CLAUDE_MAX_TOOL_ROUNDS: ${CLAUDE_MAX_TOOL_ROUNDS:-}
+      # Telegram
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      # Radicale
+      RADICALE_URL: ${RADICALE_URL:-}
+      RADICALE_USER: ${RADICALE_USER:-}
+      RADICALE_PASS: ${RADICALE_PASS:-}
+      # Dreeve
+      DREEVE_URL: ${DREEVE_URL:-}
+      DREEVE_API_URL: ${DREEVE_API_URL:-}
+      DREEVE_API_KEY: ${DREEVE_API_KEY:-}
+      DREEVE_MCP_KEY: ${DREEVE_MCP_KEY:-}
+      DREEVE_MCP_URL: ${DREEVE_MCP_URL:-}
+      DREEVE_RUN_TYPES: ${DREEVE_RUN_TYPES:-}
+      # Météo
+      WEATHER_LOCATIONS: ${WEATHER_LOCATIONS:-}
+      WEATHER_LAT: ${WEATHER_LAT:-}
+      WEATHER_LON: ${WEATHER_LON:-}
+      WEATHER_API_URL: ${WEATHER_API_URL:-}
+      # Alerte pluie
+      RAIN_ALERT_CHECK_MINUTES: ${RAIN_ALERT_CHECK_MINUTES:-}
+      RAIN_ALERT_HOURS_AHEAD: ${RAIN_ALERT_HOURS_AHEAD:-}
+      RAIN_ALERT_PROBABILITY: ${RAIN_ALERT_PROBABILITY:-}
+      RAIN_ALERT_MIN_MM: ${RAIN_ALERT_MIN_MM:-}
+      RAIN_ALERT_SKIP_KEYWORDS: ${RAIN_ALERT_SKIP_KEYWORDS:-}
+      # Coach
+      COACH_TZ: ${COACH_TZ:-}
+      BRIEFING_TIME: ${BRIEFING_TIME:-}
+      ACTIVITY_POLL_MINUTES: ${ACTIVITY_POLL_MINUTES:-}
+      PLANNING_HORIZON_DAYS: ${PLANNING_HORIZON_DAYS:-}
+      CALENDAR_CONTEXT_DAYS: ${CALENDAR_CONTEXT_DAYS:-}
+      HISTORY_MESSAGES: ${HISTORY_MESSAGES:-}
+      COACH_SEED_MEMORY: ${COACH_SEED_MEMORY:-}
+      # Technique
+      HTTP_TIMEOUT: ${HTTP_TIMEOUT:-}
+      LOG_LEVEL: ${LOG_LEVEL:-}
       COACH_DATA_DIR: /data
       TZ: ${COACH_TZ:-Europe/Paris}
     ports:

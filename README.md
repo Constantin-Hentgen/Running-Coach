@@ -92,8 +92,8 @@ cp .env.example .env
 ### Déployer avec Portainer (stack depuis le dépôt Git)
 
 1. *Stacks → Add stack → Repository* : URL du dépôt, référence `refs/heads/main`, chemin `docker-compose.yml`.
-2. Dans **Environment variables**, passe en *Advanced mode* et colle le contenu de ton `.env` (le dépôt n'en contient pas, c'est voulu).
-3. *Deploy the stack*. Portainer écrit ces variables dans `stack.env`, que `docker-compose.yml` charge automatiquement.
+2. Dans **Environment variables**, passe en *Advanced mode* et colle le contenu de ton `.env` (le dépôt n'en contient pas, c'est voulu). Seules les lignes `NOM=valeur` comptent ; ne laisse pas de ligne vide en mode simple.
+3. *Deploy the stack*. Chaque variable est injectée par `docker-compose.yml` (`${NOM}`) ; une variable absente prend sa valeur par défaut.
 
 Pour une mise à jour : *Pull and redeploy* (cocher *Re-pull image* n'est pas nécessaire, l'image est construite depuis le dépôt). La mémoire du coach est dans le volume `coach-data` et survit aux redéploiements.
 
@@ -146,7 +146,7 @@ Pour une mise à jour : *Pull and redeploy* (cocher *Re-pull image* n'est pas n�
 | `CLAUDE_MAX_TOKENS` | `16000` | Tokens max par réponse |
 | `CLAUDE_MAX_TOOL_ROUNDS` | `25` | Garde-fou : allers-retours d'outils max par message |
 | `COACH_TZ` | `Europe/Paris` | Fuseau horaire |
-| `BRIEFING_TIME` | `08:00` | Heure du briefing ; vide = désactivé |
+| `BRIEFING_TIME` | `08:00` | Heure du briefing ; `off` = désactivé |
 | `ACTIVITY_POLL_MINUTES` | `15` | Détection des nouveaux runs ; `0` = désactivé |
 | `PLANNING_HORIZON_DAYS` | `30` | Jours (re)planifiés par le briefing |
 | `CALENDAR_CONTEXT_DAYS` | `45` | Jours d'agenda fournis au coach |
@@ -271,8 +271,8 @@ Les tests ne nécessitent ni clé ni réseau : appels Claude, Dreeve et MCP sont
 | Symptôme | Cause probable |
 |---|---|
 | `[CONFIG] … manquante` au démarrage | Variable requise vide dans `.env` (ou dans les variables du stack Portainer) |
-| Portainer : `env file … .env not found` | Ancienne version de `docker-compose.yml` : mets le dépôt à jour. Les variables se saisissent dans l'UI du stack, pas dans un fichier |
-| Portainer : `required` / `path` non reconnu dans `env_file` | Portainer trop ancien (Compose < 2.24) : mets Portainer à jour |
+| Portainer : `env file … .env not found` ou `invalid environment variable: =` | Ancienne version de `docker-compose.yml` : mets le dépôt à jour (*Pull and redeploy*). Supprime aussi les lignes vides de la liste de variables du stack |
+| Une nouvelle variable de `.env.example` est sans effet | Elle doit aussi figurer dans `docker-compose.yml` (un test le vérifie) |
 | Le bot répond « Configuration : ajoute TELEGRAM_CHAT_ID=… » | Normal tant que `TELEGRAM_CHAT_ID` est vide (étape 3) |
 | `[DREEVE MCP] Connexion impossible …` | Clé `drvm_…` absente ou fausse ici **ou dans le `.env` de Dreeve** ; ne pas confondre avec la clé REST `drv_…` |
 | `[DREEVE] … HTTP 401` | `DREEVE_API_KEY` invalide, ou non définie côté Dreeve |

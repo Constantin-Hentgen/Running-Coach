@@ -13,7 +13,10 @@ logger = logging.getLogger(__name__)
 
 
 def _str(name: str, default: str | None = None) -> str | None:
+    """Valeur nettoyée ; vide = non définie. Retire des guillemets englobants (l'UI Portainer les conserve)."""
     value = os.getenv(name, "").strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+        value = value[1:-1].strip()
     return value or default
 
 
@@ -59,14 +62,14 @@ def parse_locations(raw: str | None) -> list[tuple[str, float, float]]:
 
 
 def _briefing_time(value: str | None) -> tuple[int, int] | None:
-    if not value:
+    if not value or value.lower() in ("off", "non", "no", "none", "0"):
         return None
     try:
         hour, minute = (int(x) for x in value.split(":"))
         datetime.time(hour, minute)
         return hour, minute
     except ValueError:
-        raise ValueError(f"BRIEFING_TIME doit être au format HH:MM (reçu : {value!r})") from None
+        raise ValueError(f"BRIEFING_TIME doit être au format HH:MM ou « off » (reçu : {value!r})") from None
 
 
 def _weather_locations() -> list[tuple[str, float, float]]:
