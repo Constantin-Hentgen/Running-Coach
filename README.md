@@ -89,6 +89,14 @@ cp .env.example .env
 
 ---
 
+### Déployer avec Portainer (stack depuis le dépôt Git)
+
+1. *Stacks → Add stack → Repository* : URL du dépôt, référence `refs/heads/main`, chemin `docker-compose.yml`.
+2. Dans **Environment variables**, passe en *Advanced mode* et colle le contenu de ton `.env` (le dépôt n'en contient pas, c'est voulu).
+3. *Deploy the stack*. Portainer écrit ces variables dans `stack.env`, que `docker-compose.yml` charge automatiquement.
+
+Pour une mise à jour : *Pull and redeploy* (cocher *Re-pull image* n'est pas nécessaire, l'image est construite depuis le dépôt). La mémoire du coach est dans le volume `coach-data` et survit aux redéploiements.
+
 ## ⚙️ Configuration
 
 **Toute** la configuration passe par `.env` ; aucun réglage n'est codé en dur. Le fichier [`.env.example`](.env.example) est commenté ligne par ligne.
@@ -262,7 +270,9 @@ Les tests ne nécessitent ni clé ni réseau : appels Claude, Dreeve et MCP sont
 
 | Symptôme | Cause probable |
 |---|---|
-| `[CONFIG] … manquante` au démarrage | Variable requise vide dans `.env` |
+| `[CONFIG] … manquante` au démarrage | Variable requise vide dans `.env` (ou dans les variables du stack Portainer) |
+| Portainer : `env file … .env not found` | Ancienne version de `docker-compose.yml` : mets le dépôt à jour. Les variables se saisissent dans l'UI du stack, pas dans un fichier |
+| Portainer : `required` / `path` non reconnu dans `env_file` | Portainer trop ancien (Compose < 2.24) : mets Portainer à jour |
 | Le bot répond « Configuration : ajoute TELEGRAM_CHAT_ID=… » | Normal tant que `TELEGRAM_CHAT_ID` est vide (étape 3) |
 | `[DREEVE MCP] Connexion impossible …` | Clé `drvm_…` absente ou fausse ici **ou dans le `.env` de Dreeve** ; ne pas confondre avec la clé REST `drv_…` |
 | `[DREEVE] … HTTP 401` | `DREEVE_API_KEY` invalide, ou non définie côté Dreeve |
