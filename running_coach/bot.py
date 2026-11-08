@@ -78,7 +78,7 @@ class CoachBot:
         return True
 
     async def on_memory(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """/memoire : ce que le coach a retenu (pour corriger : « oublie le #3 », « en fait je préfère… »)."""
+        """/memory : ce que le coach a retenu (pour corriger : « oublie le #3 », « en fait je préfère… »)."""
         if not update.message or not await self._authorized(update):
             return
         text = ("*🧠 Ce que je sais de toi*\n" + md_escape(store.render())
@@ -241,9 +241,9 @@ def build_bot() -> CoachBot:
     app = Application.builder().token(settings.telegram_bot_token).build()
     bot = CoachBot(app)
     handlers = {
-        "programme": bot.on_agenda, "forme": bot.on_form, "derniers": bot.on_last_runs,
-        "meteo": bot.on_weather, "memoire": bot.on_memory, "debrief": bot.on_debrief,
-        "briefing": bot.on_briefing, "aide": bot.on_help,
+        "plan": bot.on_agenda, "load": bot.on_form, "runs": bot.on_last_runs,
+        "weather": bot.on_weather, "memory": bot.on_memory, "debrief": bot.on_debrief,
+        "briefing": bot.on_briefing, "help": bot.on_help,
     }
     for name, aliases, _ in commands.COMMANDS:
         app.add_handler(CommandHandler([name, *aliases], handlers[name]))

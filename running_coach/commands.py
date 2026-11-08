@@ -13,14 +13,14 @@ AGENDA_MAX_DAYS = 45
 
 # (commande principale, alias, description du menu « / » de Telegram)
 COMMANDS = [
-    ("programme", ["plan"], "Séances prévues (7 jours, ou /programme 14)"),
-    ("forme", ["load"], "Charge d'entraînement et volume récent"),
-    ("derniers", ["last"], "Tes derniers runs"),
-    ("meteo", ["weather"], "Prévisions par lieu d'entraînement"),
-    ("memoire", ["memory"], "Ce que le coach sait de toi"),
+    ("plan", [], "Séances prévues (7 jours, ou /plan 14)"),
+    ("load", [], "Charge d'entraînement et volume récent"),
+    ("runs", [], "Tes derniers runs"),
+    ("weather", [], "Prévisions par lieu d'entraînement"),
+    ("memory", [], "Ce que le coach sait de toi"),
     ("debrief", [], "Débrief IA de ton dernier run"),
     ("briefing", [], "Briefing IA complet et ajustement du programme"),
-    ("aide", ["help", "start"], "Liste des commandes"),
+    ("help", ["start"], "Liste des commandes"),
 ]
 
 BOT_COMMANDS = [BotCommand(name, desc) for name, _, desc in COMMANDS]
@@ -29,23 +29,23 @@ HELP_TEXT = """🏃 *Ton coach running*
 Écris-moi simplement : « décale ma sortie de samedi », « je suis crevé, allège demain », « planifie ma semaine »…
 
 *Infos instantanées* (sans IA, gratuites)
-/programme — séances prévues sur 7 jours (/programme 14 pour 14 jours)
-/forme — charge d'entraînement (TSB, ratio A/C) et volume
-/derniers — tes 5 derniers runs
-/meteo — prévisions par lieu
-/memoire — ce que je sais de toi
+/plan — séances prévues sur 7 jours (/plan 14 pour 14 jours)
+/load — charge d'entraînement (TSB, ratio A/C) et volume
+/runs — tes 5 derniers runs
+/weather — prévisions par lieu
+/memory — ce que je sais de toi
 
 *Avec le coach* (IA)
 /debrief — débrief de ton dernier run
 /briefing — briefing complet, ajuste le programme dans l'agenda
 
-/aide — cette aide
+/help — cette aide
 
 _Automatique : débrief après chaque run, briefing chaque matin, alerte si pluie sur une séance._"""
 
 
 def parse_days(args: list[str]) -> int:
-    """Nombre de jours demandé à /programme, borné ; valeur par défaut si absent ou invalide."""
+    """Nombre de jours demandé à /plan, borné ; valeur par défaut si absent ou invalide."""
     try:
         days = int(args[0]) if args else AGENDA_DEFAULT_DAYS
     except ValueError:

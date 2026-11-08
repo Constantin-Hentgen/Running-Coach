@@ -47,7 +47,7 @@ flowchart LR
 | Module | Role |
 |---|---|
 | `running_coach/app.py` | FastAPI app (`/health`), starts the bot and the scheduler, connectivity checks |
-| `running_coach/bot.py` | Telegram handlers, `/memoire`, morning briefing, new-run detection, rain alerts |
+| `running_coach/bot.py` | Telegram handlers and commands, morning briefing, new-run detection, rain alerts |
 | `running_coach/agent.py` | System prompt, real-time context, tool loop with prompt caching |
 | `running_coach/tools.py` | Tools exposed to the model (calendar, memory), action ledger, verified report |
 | `running_coach/calendar_store.py` | CalDAV + iCalendar access: reads, writes verified by read-back |
@@ -88,7 +88,7 @@ cp .env.example .env
    The logs show what is enabled (`[CONFIG] …`) and a check of each service (`[DREEVE]`, `[DREEVE MCP]`, `[METEO]`, `[RADICALE]`).
 3. **Get your chat ID**: send any message to your bot. While `TELEGRAM_CHAT_ID` is empty, it runs in *setup mode* and only replies with your ID.
 4. **Put that ID** in `TELEGRAM_CHAT_ID`, then run `docker compose up -d` to restart. The bot now only obeys you, and the briefing, debriefs and rain alerts are active.
-5. **Introduce yourself** to your coach: goals, constraints, preferences. It remembers them (check with `/memoire`).
+5. **Introduce yourself** to your coach: goals, constraints, preferences. It remembers them (check with `/memory`).
 
 ### Deploying with Portainer (stack from the Git repository)
 
@@ -179,16 +179,16 @@ Just talk to it (in French), for example:
 
 | Command | Effect |
 |---|---|
-| `/programme` (or `/plan`) | Planned sessions for the next 7 days; `/programme 14` for 14 (max 45) |
-| `/forme` (or `/load`) | Training load (CTL, ATL, TSB, A:C ratio, rest days) and the last 4 weeks' volume |
-| `/derniers` (or `/last`) | Your last 5 runs |
-| `/meteo` (or `/weather`) | Forecast for each training place |
-| `/memoire` (or `/memory`) | Shows everything the coach knows about you, with each memory's number |
+| `/plan` | Planned sessions for the next 7 days; `/plan 14` for 14 (max 45) |
+| `/load` | Training load (CTL, ATL, TSB, A:C ratio, rest days) and the last 4 weeks' volume |
+| `/runs` | Your last 5 runs |
+| `/weather` | Forecast for each training place |
+| `/memory` | Shows everything the coach knows about you, with each memory's number |
 | `/debrief` | AI debrief of your latest run (same 4 parts as the automatic one, read-only) |
 | `/briefing` | Runs the full briefing now: reviews everything and adjusts the plan in your calendar |
-| `/aide` (or `/help`, `/start`) | Lists the commands |
+| `/help` (or `/start`) | Lists the commands |
 
-The first five answer instantly from your data, with no AI call (free). The French names also appear in Telegram's `/` menu.
+The first five answer instantly from your data, with no AI call (free). They all appear in Telegram's `/` menu; the bot still answers in French.
 
 To correct the memory: *« oublie le #3 »* (forget #3), or simply say what changed: it replaces the old memory.
 
