@@ -94,23 +94,26 @@ def format_load(d: dict) -> str:
     )
 
 
-def format_runs(activities: list[dict], today: datetime.date) -> str:
-    """Volume hebdo (semaines lun→dim) + derniers runs détaillés + plus longue sortie."""
+def weekly_volume(activities: list[dict], today: datetime.date, weeks: int) -> list[tuple[datetime.date, float, int]]:
+    """(lundi, km, nb de sorties) pour les `weeks` dernières semaines lun→dim, la plus ancienne d'abord."""
     week0 = today - datetime.timedelta(days=today.weekday())
-    weeks = defaultdict(lambda: [0.0, 0])
+    totals = defaultdict(lambda: [0.0, 0])
     for a in activities:
         try:
             d = datetime.date.fromisoformat((a.get("startDateLocal") or "")[:10])
         except ValueError:
             continue
         monday = d - datetime.timedelta(days=d.weekday())
-        weeks[monday][0] += distance_km(a)
-        weeks[monday][1] += 1
+        totals[monday][0] += distance_km(a)
+        totals[monday][1] += 1
+    mondays = [week0 - datetime.timedelta(weeks=i) for i in range(weeks - 1, -1, -1)]
+    return [(m, *totals.get(m, (0.0, 0))) for m in mondays]
 
+
+def format_runs(activities: list[dict], today: datetime.date) -> str:
+    """Volume hebdo (semaines lun→dim) + derniers runs détaillés + plus longue sortie."""
     lines = [f"Volume course par semaine ({VOLUME_WEEKS} dernières, semaine en cours incluse) :"]
-    for i in range(VOLUME_WEEKS - 1, -1, -1):
-        monday = week0 - datetime.timedelta(weeks=i)
-        km, n = weeks.get(monday, (0.0, 0))
+    for monday, km, n in weekly_volume(activities, today, VOLUME_WEEKS):
         lines.append(f"- semaine du {monday:%d/%m} : {km:.1f} km en {n} sortie(s)")
 
     if activities:
@@ -131,15 +134,24 @@ def get_load_text() -> str:
     return format_load(_get_json("/metrics/training-load"))
 
 
-def get_runs_text() -> str:
+def get_runs_since_weeks(weeks: int) -> tuple[list[dict], datetime.date]:
+    """Runs depuis le lundi d'il y a `weeks - 1` semaines, et la date du jour."""
     today = datetime.datetime.now(TZ).date()
-    since = today - datetime.timedelta(days=today.weekday(), weeks=VOLUME_WEEKS - 1)
+    since = today - datetime.timedelta(days=today.weekday(), weeks=weeks - 1)
     data = _get_json("/activities", **{
         "filters[from]": since.isoformat(),
         "filters[sportType]": settings.dreeve_run_types,
         "pagination[size]": 100,
     })
-    return format_runs(data.get("activities") or [], today)
+    return data.get("activities") or [], today
+
+
+def get_runs_text() -> str:
+    return format_runs(*get_runs_since_weeks(VOLUME_WEEKS))
+
+
+def get_load() -> dict:
+    return _get_json("/metrics/training-load")
 
 
 def get_summary() -> str:
@@ -156,10 +168,23 @@ def get_summary() -> str:
     return "\n".join(parts)
 
 
-def get_latest_run() -> dict | None:
-    data = _get_json("/activities", timeout=5, **{"filters[sportType]": settings.dreeve_run_types, "pagination[size]": 1})
-    activities = data.get("activities") or []
-    return activities[0] if activities else None
+def get_recent_runs(count: int = 5) -> list[dict]:
+    """Derniers runs, du plus récent au plus ancien."""
+    data = _get_json("/activities", timeout=5, **{"filters[sportType]": settings.dreeve_run_types, "pagination[size]": count})
+    return data.get("activities") or []
+
+
+def new_runs_since(runs: list[dict], previous_id) -> list[dict]:
+    """Runs plus récents que `previous_id`, du plus ancien au plus récent.
+
+    `runs` est trié du plus récent au plus ancien. Si `previous_id` n'y figure plus
+    (séance supprimée, ou plus de `len(runs)` imports d'un coup), seul le dernier compte.
+    """
+    ids = [r.get("id") for r in runs]
+    if not runs or ids[0] == previous_id:
+        return []
+    fresh = runs[:ids.index(previous_id)] if previous_id in ids else runs[:1]
+    return list(reversed(fresh))
 
 
 def ping() -> dict:

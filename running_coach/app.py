@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from . import calendar_store as cs
 from . import dreeve, dreeve_mcp, weather
 from .bot import build_bot
+from .commands import BOT_COMMANDS
 from .config import UTC, settings
 
 logging.basicConfig(level=(os.getenv("LOG_LEVEL") or "INFO").strip().upper(), format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -59,6 +60,10 @@ async def lifespan(_: FastAPI):
         await tg_app.initialize()
         await tg_app.start()
         await tg_app.updater.start_polling()
+        try:
+            await tg_app.bot.set_my_commands(BOT_COMMANDS)   # menu « / » dans Telegram
+        except Exception as e:
+            logger.warning(f"Menu des commandes Telegram non publié : {e}")
 
         if settings.telegram_chat_id:
             scheduler = AsyncIOScheduler(timezone=settings.tz)
@@ -70,7 +75,8 @@ async def lifespan(_: FastAPI):
                 scheduler.add_job(bot.check_rain, "interval", minutes=settings.rain_check_minutes, coalesce=True,
                                   next_run_time=datetime.datetime.now(settings.tz) + datetime.timedelta(minutes=1))
             if settings.dreeve_enabled and settings.activity_poll_minutes > 0:
-                scheduler.add_job(bot.check_new_activity, "interval", minutes=settings.activity_poll_minutes, coalesce=True)
+                scheduler.add_job(bot.check_new_activity, "interval", minutes=settings.activity_poll_minutes, coalesce=True,
+                                  next_run_time=datetime.datetime.now(settings.tz) + datetime.timedelta(minutes=1))
             scheduler.start()
         else:
             logger.warning("TELEGRAM_CHAT_ID non défini : mode configuration. Envoie un message au bot, "
@@ -94,3 +100,4 @@ app = FastAPI(lifespan=lifespan)
 @app.get("/health")
 def health_check():
     return {"status": "running", "telegram": getattr(app.state, "telegram_running", False)}
+

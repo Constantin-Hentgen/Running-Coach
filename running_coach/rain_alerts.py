@@ -1,6 +1,7 @@
 """Alerte pluie : prévient sur Telegram quand il va pleuvoir pendant une séance planifiée.
 
-- Séances lues dans l'agenda sur les RAIN_ALERT_HOURS_AHEAD prochaines heures
+- Séances lues dans l'agenda sur les RAIN_ALERT_HOURS_AHEAD prochaines heures (48 h par défaut : l'alerte
+  part dès que la prévision annonce de la pluie, donc normalement 24 à 48 h avant la séance)
   (on ignore les journées entières, les événements > 5 h et ceux dont le titre contient
   un mot de RAIN_ALERT_SKIP_KEYWORDS, ex. « repos »).
 - Lieu de la séance : champ LOCATION de l'événement, sinon un nom de lieu cité dans le
@@ -102,11 +103,19 @@ def find_alerts(events: list[dict], forecasts: dict[str, Hourly], now: datetime.
     return alerts
 
 
-def format_alert(alert: Alert) -> str:
+def lead_time(start: datetime.datetime, now: datetime.datetime) -> str:
+    hours = int((start - now).total_seconds() // 3600)
+    if hours < 1:
+        return "imminent"
+    return f"dans {hours} h" if hours < 48 else f"dans {hours // 24} j"
+
+
+def format_alert(alert: Alert, now: datetime.datetime | None = None) -> str:
     s, e = alert.start.astimezone(TZ), alert.end.astimezone(TZ)
+    when = f" ({lead_time(alert.start, now)})" if now else ""
     lines = [
         f"☔ *Pluie prévue sur ta séance* « {md_escape(alert.summary)} »",
-        f"- 📅 {FR_DAYS[s.weekday()]} {s:%d/%m} {s:%H:%M}–{e:%H:%M}",
+        f"- 📅 {FR_DAYS[s.weekday()]} {s:%d/%m} {s:%H:%M}–{e:%H:%M}{when}",
         f"- 📍 {md_escape(alert.place)} : {alert.risk}",
     ]
     for place, risk in alert.others.items():

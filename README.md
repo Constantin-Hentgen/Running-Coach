@@ -22,7 +22,7 @@ Coach▸ Dimanche est sec (12°C, vent faible) : sortie longue déplacée à 9h0
 
 - **Planning in your calendar**: creates, moves, edits and deletes sessions in a dedicated CalDAV calendar.
 - **Morning briefing** (configurable time): reviews training load, weather and calendar, and adjusts the upcoming days.
-- **Automatic debrief** of every new run imported into Dreeve (with laps/splits), compared with the plan.
+- **Automatic debrief** right after every run imported into Dreeve (Dreeve is checked every minute): the run vs the plan, vs your past performances, whether the coming sessions still fit, and where you stand on your goals.
 - **Persistent memory**: the coach remembers your preferences, habits, constraints, goals, injuries and gear, and applies them every time it plans.
 - **Rain alerts**: a Telegram message when rain is forecast during an upcoming session, with your other training place's forecast for comparison.
 - **Weather per training place** (e.g. home and work): each session is planned with the forecast for where you'll actually run that day.
@@ -136,7 +136,7 @@ To update: *Pull and redeploy* (no need to re-pull images, the image is built fr
 | Variable | Default | Description |
 |---|---|---|
 | `RAIN_ALERT_CHECK_MINUTES` | `60` | How often to check; `0` = disabled |
-| `RAIN_ALERT_HOURS_AHEAD` | `24` | Sessions watched: those starting within the next N hours |
+| `RAIN_ALERT_HOURS_AHEAD` | `48` | Sessions watched: those starting within the next N hours. The alert goes out as soon as the forecast shows rain, so with 48 you normally hear 24–48 h ahead |
 | `RAIN_ALERT_PROBABILITY` | `60` | Peak rain probability over the session's slot (%) that triggers an alert… |
 | `RAIN_ALERT_MIN_MM` | `0.3` | …and minimum total over the slot (mm), to ignore negligible drizzle |
 | `RAIN_ALERT_SKIP_KEYWORDS` | `repos,rest,off` | Whole words in an event title that exclude it |
@@ -150,7 +150,7 @@ To update: *Pull and redeploy* (no need to re-pull images, the image is built fr
 | `CLAUDE_MAX_TOOL_ROUNDS` | `25` | Safeguard: max tool round-trips per message |
 | `COACH_TZ` | `Europe/Paris` | Time zone |
 | `BRIEFING_TIME` | `08:00` | Briefing time; `off` = disabled |
-| `ACTIVITY_POLL_MINUTES` | `15` | New-run detection interval; `0` = disabled |
+| `ACTIVITY_POLL_MINUTES` | `1` | New-run detection interval; `0` = disabled |
 | `PLANNING_HORIZON_DAYS` | `30` | Days (re)planned by the briefing |
 | `CALENDAR_CONTEXT_DAYS` | `45` | Days of calendar given to the coach |
 | `HISTORY_MESSAGES` | `6` | Chat messages kept as history |
@@ -179,21 +179,37 @@ Just talk to it (in French), for example:
 
 | Command | Effect |
 |---|---|
+| `/programme` (or `/plan`) | Planned sessions for the next 7 days; `/programme 14` for 14 (max 45) |
+| `/forme` (or `/load`) | Training load (CTL, ATL, TSB, A:C ratio, rest days) and the last 4 weeks' volume |
+| `/derniers` (or `/last`) | Your last 5 runs |
+| `/meteo` (or `/weather`) | Forecast for each training place |
 | `/memoire` (or `/memory`) | Shows everything the coach knows about you, with each memory's number |
+| `/debrief` | AI debrief of your latest run (same 4 parts as the automatic one, read-only) |
+| `/briefing` | Runs the full briefing now: reviews everything and adjusts the plan in your calendar |
+| `/nouveau` (or `/reset`) | Starts a fresh conversation; the memory is kept |
+| `/aide` (or `/help`, `/start`) | Lists the commands |
+
+The first five answer instantly from your data, with no AI call (free). The French names also appear in Telegram's `/` menu.
 
 To correct the memory: *« oublie le #3 »* (forget #3), or simply say what changed: it replaces the old memory.
 
 ### Automations
 
 - **Briefing** every day at `BRIEFING_TIME`: fitness status, weather, plan adjustments over `PLANNING_HORIZON_DAYS` days.
-- **Rain alert** (every `RAIN_ALERT_CHECK_MINUTES` minutes): for each session in the next `RAIN_ALERT_HOURS_AHEAD` hours, the coach reads the **hourly forecast for the exact time slot** at the **session's place**. The place comes from the event's location field, which the coach fills in itself; otherwise from a place name mentioned in the session, otherwise the first place in `WEATHER_LOCATIONS`. One alert per session, built by the code without calling the model (free). It is added to the chat history, so you can simply reply « décale-la à demain » (move it to tomorrow) or « je la fais au travail » (I'll do it from work).
+- **Rain alert** (every `RAIN_ALERT_CHECK_MINUTES` minutes): for each session in the next `RAIN_ALERT_HOURS_AHEAD` hours (default 48, so you normally get the alert 24–48 h before), the coach reads the **hourly forecast for the exact time slot** at the **session's place**. The place comes from the event's location field, which the coach fills in itself; otherwise from a place name mentioned in the session, otherwise the first place in `WEATHER_LOCATIONS`. One alert per session, built by the code without calling the model (free). It is added to the chat history, so you can simply reply « décale-la à demain » (move it to tomorrow) or « je la fais au travail » (I'll do it from work).
   ```text
   ☔ Pluie prévue sur ta séance « Fractionné 8×400 m »
-  - 📅 mar 10/11 18:30–19:30
+  - 📅 mar 10/11 18:30–19:30 (dans 31 h)
   - 📍 Maison : 80 %, 2.4 mm
   - 📍 Travail : 10 %, 0.0 mm ✅ sec, bonne alternative
   ```
-- **Debrief** as soon as a new run appears in Dreeve (checked every `ACTIVITY_POLL_MINUTES` minutes). In debrief mode, the coach has **no** calendar write access.
+- **Debrief** within `ACTIVITY_POLL_MINUTES` minutes (default 1) of a new run appearing in Dreeve. Each check is a single Dreeve API call; the model only runs when there is a new run. Several runs imported at once are covered together. The debrief has four short parts:
+  1. 🏃 the run vs what was planned (laps/splits from Dreeve),
+  2. 📈 how it compares with your similar recent runs and recent trend,
+  3. 🔋 your form (TSB, A:C ratio) and whether the coming sessions still fit, with any change only *proposed*,
+  4. 🎯 progress toward your goals (memory, races in the calendar).
+
+  In debrief mode the coach has **no** calendar write access: reply « ok, fais-le » (ok, do it) to apply a proposed change.
 
 ---
 
