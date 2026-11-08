@@ -1,0 +1,17 @@
+services:
+  running-coach:
+    build: .
+    container_name: running-coach
+    restart: unless-stopped
+    # Toute la configuration vient de .env (voir .env.example)
+    env_file: .env
+    environment:
+      COACH_DATA_DIR: /data
+      TZ: ${COACH_TZ:-Europe/Paris}
+    ports:
+      - "${COACH_PORT:-18000}:8000"
+    volumes:
+      - coach-data:/data
+
+volumes:
+  coach-data:
