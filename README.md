@@ -283,3 +283,7 @@ Tests need no keys and no network: Claude, Dreeve and MCP calls are mocked. They
 | `[RADICALE] Échec de connexion CalDAV` | `RADICALE_URL` must point to the **calendar** (with its ID), not the server root |
 | Sessions are one hour off | Check `COACH_TZ` |
 | No weather in replies | `WEATHER_LOCATIONS` empty or malformed (startup fails with an explicit message if the format is wrong) |
+
+## License
+
+MIT — see [LICENSE](LICENSE).
