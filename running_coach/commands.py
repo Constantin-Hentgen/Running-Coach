@@ -20,7 +20,6 @@ COMMANDS = [
     ("memoire", ["memory"], "Ce que le coach sait de toi"),
     ("debrief", [], "Débrief IA de ton dernier run"),
     ("briefing", [], "Briefing IA complet et ajustement du programme"),
-    ("nouveau", ["reset"], "Nouvelle conversation (la mémoire est gardée)"),
     ("aide", ["help", "start"], "Liste des commandes"),
 ]
 
@@ -40,8 +39,6 @@ HELP_TEXT = """🏃 *Ton coach running*
 /debrief — débrief de ton dernier run
 /briefing — briefing complet, ajuste le programme dans l'agenda
 
-*Divers*
-/nouveau — repartir d'une conversation vierge (la mémoire est gardée)
 /aide — cette aide
 
 _Automatique : débrief après chaque run, briefing chaque matin, alerte si pluie sur une séance._"""

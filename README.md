@@ -186,7 +186,6 @@ Just talk to it (in French), for example:
 | `/memoire` (or `/memory`) | Shows everything the coach knows about you, with each memory's number |
 | `/debrief` | AI debrief of your latest run (same 4 parts as the automatic one, read-only) |
 | `/briefing` | Runs the full briefing now: reviews everything and adjusts the plan in your calendar |
-| `/nouveau` (or `/reset`) | Starts a fresh conversation; the memory is kept |
 | `/aide` (or `/help`, `/start`) | Lists the commands |
 
 The first five answer instantly from your data, with no AI call (free). The French names also appear in Telegram's `/` menu.

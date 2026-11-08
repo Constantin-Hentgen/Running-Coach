@@ -144,12 +144,6 @@ class CoachBot:
     async def on_weather(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await self._command(update, lambda: commands.format_weather(weather.get_forecast_text()))
 
-    async def on_reset(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        def build():
-            store.set_history(str(update.effective_chat.id), [])
-            return "🆕 Conversation remise à zéro. Ta mémoire est intacte (/memoire)."
-        await self._command(update, build)
-
     async def on_debrief(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.message or not await self._authorized(update):
             return
@@ -249,7 +243,7 @@ def build_bot() -> CoachBot:
     handlers = {
         "programme": bot.on_agenda, "forme": bot.on_form, "derniers": bot.on_last_runs,
         "meteo": bot.on_weather, "memoire": bot.on_memory, "debrief": bot.on_debrief,
-        "briefing": bot.on_briefing, "nouveau": bot.on_reset, "aide": bot.on_help,
+        "briefing": bot.on_briefing, "aide": bot.on_help,
     }
     for name, aliases, _ in commands.COMMANDS:
         app.add_handler(CommandHandler([name, *aliases], handlers[name]))
