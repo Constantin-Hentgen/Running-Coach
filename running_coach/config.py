@@ -72,6 +72,27 @@ def _briefing_time(value: str | None) -> tuple[int, int] | None:
         raise ValueError(f"BRIEFING_TIME doit être au format HH:MM ou « off » (reçu : {value!r})") from None
 
 
+_DOW = {"mon": 0, "lun": 0, "tue": 1, "mar": 1, "wed": 2, "mer": 2, "thu": 3, "jeu": 3,
+        "fri": 4, "ven": 4, "sat": 5, "sam": 5, "sun": 6, "dim": 6}
+
+
+def _weekly_time(value: str | None) -> tuple[int, int, int] | None:
+    """WEEKLY_REVIEW_TIME : « sun 19:00 » → (jour 0-6, heure, minute) ; off = désactivé."""
+    if not value or value.lower() in ("off", "non", "no", "none", "0"):
+        return None
+    try:
+        day, hm = value.lower().split()
+        hour, minute = (int(x) for x in hm.split(":"))
+        datetime.time(hour, minute)
+        return _DOW[day[:3]], hour, minute
+    except (ValueError, KeyError):
+        raise ValueError(f"WEEKLY_REVIEW_TIME doit être au format « sun 19:00 » ou « off » (reçu : {value!r})") from None
+
+
+def _optional_model(value: str | None) -> str | None:
+    return None if not value or value.lower() in ("off", "non", "no", "none", "0") else value
+
+
 def _weather_locations() -> list[tuple[str, float, float]]:
     locations = parse_locations(_str("WEATHER_LOCATIONS"))
     if not locations:   # ancien format, un seul lieu
@@ -86,6 +107,7 @@ class Settings:
     # Anthropic
     anthropic_api_key: str | None
     model: str
+    planning_model: str
     max_output_tokens: int
     max_tool_rounds: int
     # Telegram
@@ -95,6 +117,7 @@ class Settings:
     radicale_url: str | None
     radicale_user: str | None
     radicale_pass: str | None
+    radicale_tasks_url: str | None
     # Dreeve
     dreeve_url: str | None
     dreeve_api_key: str | None
@@ -110,9 +133,14 @@ class Settings:
     rain_probability: int
     rain_min_mm: float
     rain_skip_keywords: list[str]
+    heat_alert_c: float
+    gust_alert_kmh: float
+    freeze_alert_c: float
     # Coach
     tz: ZoneInfo
     briefing_time: tuple[int, int] | None
+    weekly_review: tuple[int, int, int] | None
+    whisper_model: str | None
     activity_poll_minutes: int
     planning_horizon_days: int
     context_days_ahead: int
@@ -128,6 +156,7 @@ class Settings:
         return cls(
             anthropic_api_key=_str("ANTHROPIC_API_KEY"),
             model=_str("CLAUDE_MODEL", "claude-haiku-5-5"),
+            planning_model=_str("CLAUDE_PLANNING_MODEL", "claude-sonnet-5-5"),
             max_output_tokens=_int("CLAUDE_MAX_TOKENS", 16000),
             max_tool_rounds=_int("CLAUDE_MAX_TOOL_ROUNDS", 25),
             telegram_bot_token=_str("TELEGRAM_BOT_TOKEN"),
@@ -135,6 +164,7 @@ class Settings:
             radicale_url=_str("RADICALE_URL"),
             radicale_user=_str("RADICALE_USER"),
             radicale_pass=_str("RADICALE_PASS"),
+            radicale_tasks_url=_str("RADICALE_TASKS_URL"),
             dreeve_url=dreeve_url,
             dreeve_api_key=_str("DREEVE_API_KEY"),
             dreeve_mcp_key=_str("DREEVE_MCP_KEY"),
@@ -148,8 +178,13 @@ class Settings:
             rain_min_mm=_float("RAIN_ALERT_MIN_MM") if _str("RAIN_ALERT_MIN_MM") else 0.3,
             rain_skip_keywords=[k.strip().lower() for k in _str("RAIN_ALERT_SKIP_KEYWORDS", "repos,rest,off").split(",")
                                 if k.strip()],
+            heat_alert_c=_float("WEATHER_ALERT_HEAT_C") if _str("WEATHER_ALERT_HEAT_C") else 28.0,
+            gust_alert_kmh=_float("WEATHER_ALERT_GUST_KMH") if _str("WEATHER_ALERT_GUST_KMH") else 50.0,
+            freeze_alert_c=_float("WEATHER_ALERT_FREEZE_C") if _str("WEATHER_ALERT_FREEZE_C") else 1.0,
             tz=ZoneInfo(_str("COACH_TZ") or _str("TZ") or "Europe/Paris"),
             briefing_time=_briefing_time(_str("BRIEFING_TIME", "08:00")),
+            weekly_review=_weekly_time(_str("WEEKLY_REVIEW_TIME", "sun 19:00")),
+            whisper_model=_optional_model(_str("WHISPER_MODEL", "small")),
             activity_poll_minutes=_int("ACTIVITY_POLL_MINUTES", 1),
             planning_horizon_days=_int("PLANNING_HORIZON_DAYS", 30),
             context_days_ahead=_int("CALENDAR_CONTEXT_DAYS", 45),
@@ -181,11 +216,14 @@ class Settings:
             "TELEGRAM_CHAT_ID (sécurité + briefing + débriefs)": self.telegram_chat_id,
             "Dreeve REST (DREEVE_URL + DREEVE_API_KEY)": self.dreeve_enabled,
             "Dreeve MCP (DREEVE_MCP_KEY)": self.dreeve_mcp_key and self.dreeve_mcp_url,
+            "Liste de courses dans Radicale (RADICALE_TASKS_URL)": self.radicale_tasks_url,
+            f"Messages vocaux (WHISPER_MODEL={self.whisper_model or 'off'})": self.whisper_model,
             f"Météo ({', '.join(n for n, _, _ in self.weather_locations) or 'WEATHER_LOCATIONS'})": self.weather_enabled,
         }
         for name, ok in optional.items():
             logger.info(f"[CONFIG] {name} : {'activé' if ok else 'désactivé'}")
-        logger.info(f"[CONFIG] modèle={self.model}, fuseau={self.tz.key}, briefing={self.briefing_time}, "
+        logger.info(f"[CONFIG] modèles={self.model} (conversation) / {self.planning_model} (planification), "
+                    f"fuseau={self.tz.key}, briefing={self.briefing_time}, bilan hebdo={self.weekly_review}, "
                     f"détection runs={self.activity_poll_minutes} min")
 
 

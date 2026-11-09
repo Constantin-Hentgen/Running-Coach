@@ -5,14 +5,14 @@ from dataclasses import dataclass, field
 from . import calendar_store as cs
 from .config import settings
 from .formatting import md_escape
-from .memory import CATEGORIES, store
+from .memory import CATEGORIES, GOAL_KINDS, GOAL_PRIORITIES, format_goal, store
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class Action:
-    kind: str       # "create" | "update" | "delete" | "remember" | "forget"
+    kind: str       # create | update | delete | remember | forget | goal | goal_remove | proposal | shopping
     label: str
     ok: bool
     detail: str = ""
@@ -105,6 +105,47 @@ def tool_forget(args: dict, ledger: Ledger) -> dict:
     item = store.forget(int(args["id"]))
     ledger.record("forget", item["text"], True)
     return {"ok": True, "forgotten": item["text"]}
+
+
+def tool_set_goal(args: dict, ledger: Ledger) -> dict:
+    goal_id = args.get("goal_id")
+    item = store.set_goal(args.get("title", ""), kind=args.get("kind", "course"), date=args.get("date") or None,
+                          target=args.get("target"), priority=args.get("priority"), notes=args.get("notes"),
+                          goal_id=int(goal_id) if goal_id not in (None, "") else None)
+    ledger.record("goal", format_goal(item)[2:], True)
+    return {"ok": True, "goal": item}
+
+
+def tool_remove_goal(args: dict, ledger: Ledger) -> dict:
+    item = store.remove_goal(int(args["id"]))
+    ledger.record("goal_remove", item["title"], True)
+    return {"ok": True, "removed": item["title"]}
+
+
+def tool_propose_change(args: dict, ledger: Ledger) -> dict:
+    text = " ".join((args.get("change") or "").split())
+    if not text:
+        raise ValueError("proposition vide")
+    pid = store.add_proposal(text[:1000])
+    ledger.record("proposal", text, True, detail=str(pid))
+    return {"ok": True, "proposal_id": pid, "note": "Des boutons Appliquer / Ajuster / Ignorer seront affichés sous ta réponse."}
+
+
+def tool_save_shopping_list(args: dict, ledger: Ledger) -> dict:
+    items = []
+    for it in args.get("items") or []:
+        name = " ".join(str(it.get("name") or "").split())
+        if not name:
+            continue
+        qty = " ".join(str(it.get("quantity") or "").split())
+        items.append((f"{name} ({qty})" if qty else name, (it.get("aisle") or "").strip() or None))
+    try:
+        r = cs.replace_shopping_list(items)
+    except Exception as e:
+        ledger.record("shopping", f"{len(items)} article(s)", False, str(e))
+        raise
+    ledger.record("shopping", f"{r['saved']} article(s)", True)
+    return {"ok": True, **r}
 
 
 # ---------------------------------------------------------------------------
@@ -210,8 +251,82 @@ MEMORY_TOOLS = [
     },
 ]
 
-ALL_TOOLS = [LIST_TOOL, *WRITE_TOOLS, *MEMORY_TOOLS]
-READ_ONLY_TOOLS = [LIST_TOOL, *MEMORY_TOOLS]
+GOAL_TOOLS = [
+    {
+        "name": "set_goal",
+        "description": (
+            "Crée ou met à jour (goal_id) un objectif STRUCTURÉ de l'athlète : course (date, distance, chrono visé), "
+            "objectif santé (poids, sommeil…) ou autre. C'est la référence pour périodiser le plan (affûtage avant la course, "
+            "semaines d'assimilation). Les objectifs datés vont ici, pas dans `remember`. Pour mettre à jour, renvoie TOUS les champs."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "ex: « Semi-marathon de Paris », « Revenir à 72 kg »"},
+                "kind": {"type": "string", "enum": GOAL_KINDS},
+                "date": {"type": "string", "description": "date ISO de la course ou échéance, ex: 2027-03-07"},
+                "target": {"type": "string", "description": "ex: « 1h45 », « 72 kg », « finir sans marcher »"},
+                "priority": {"type": "string", "enum": GOAL_PRIORITIES,
+                             "description": "A = objectif principal de la saison, B = important, C = préparation"},
+                "notes": {"type": "string", "description": "≤ 300 caractères : distance, dénivelé, contexte"},
+                "goal_id": {"type": "integer", "description": "id de l'objectif à remplacer (mise à jour)"},
+            },
+            "required": ["title", "kind"],
+        },
+    },
+    {
+        "name": "remove_goal",
+        "description": "Supprime un objectif atteint, passé ou abandonné.",
+        "input_schema": {"type": "object", "properties": {"id": {"type": "integer"}}, "required": ["id"]},
+    },
+]
+
+PROPOSE_TOOL = {
+    "name": "propose_change",
+    "description": (
+        "Enregistre un changement d'agenda que tu PROPOSES sans le faire (débrief, bilan, alerte météo, ou quand tu demandes "
+        "confirmation). L'athlète verra des boutons Appliquer / Ajuster / Ignorer : s'il clique Appliquer, ce texte te sera "
+        "renvoyé pour exécution, il doit donc être autonome et précis (séance, date, heure, contenu, UID si connu). "
+        "Une proposition par appel ; n'en fais pas pour un simple conseil sans changement d'agenda."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {"change": {"type": "string", "description": "ex: « Déplacer le fractionné du mar 10/11 18:30 (UID …) au mer 11/11 18:30, même contenu »"}},
+        "required": ["change"],
+    },
+}
+
+SHOPPING_TOOLS = [
+    {
+        "name": "save_shopping_list",
+        "description": (
+            "Enregistre la liste de courses comme tâches à cocher dans la liste Radicale de l'athlète (remplace la précédente "
+            "liste du coach). À appeler UNIQUEMENT quand l'athlète demande une liste de courses, une fois la liste finalisée."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string", "description": "ex: « Bananes »"},
+                            "quantity": {"type": "string", "description": "ex: « 6 », « 500 g »"},
+                            "aisle": {"type": "string", "description": "rayon avec émoji, ex: « 🥦 Fruits et légumes »"},
+                        },
+                        "required": ["name"],
+                    },
+                },
+            },
+            "required": ["items"],
+        },
+    },
+] if settings.radicale_tasks_url else []
+
+_COMMON = [*MEMORY_TOOLS, *GOAL_TOOLS, PROPOSE_TOOL, *SHOPPING_TOOLS]
+ALL_TOOLS = [LIST_TOOL, *WRITE_TOOLS, *_COMMON]
+READ_ONLY_TOOLS = [LIST_TOOL, *_COMMON]
 
 _IMPL = {
     "list_calendar_events": tool_list,
@@ -220,6 +335,10 @@ _IMPL = {
     "delete_calendar_event": tool_delete,
     "remember": tool_remember,
     "forget": tool_forget,
+    "set_goal": tool_set_goal,
+    "remove_goal": tool_remove_goal,
+    "propose_change": tool_propose_change,
+    "save_shopping_list": tool_save_shopping_list,
 }
 
 
@@ -240,7 +359,7 @@ def run_tool(name: str, args: dict, ledger: Ledger, allowed: set[str]) -> dict:
 # ---------------------------------------------------------------------------
 
 _VERBS = {"create": "Créé", "update": "Modifié", "delete": "Supprimé"}
-_MEMORY_ICONS = {"remember": "🧠 Noté", "forget": "🗑️ Oublié"}
+_MEMORY_ICONS = {"remember": "🧠 Noté", "forget": "🗑️ Oublié", "goal": "🎯 Objectif enregistré", "goal_remove": "🏁 Objectif retiré"}
 
 
 def build_report(ledger: Ledger, truncated: bool, error: str | None = None) -> str:
@@ -256,6 +375,10 @@ def build_report(ledger: Ledger, truncated: bool, error: str | None = None) -> s
         lines.append(f"_{len(ok)} réussie(s), {len(ko)} échec(s)_")
     if memory:
         lines += [f"{_MEMORY_ICONS[a.kind]} : {md_escape(a.label)}" for a in memory]
+    for a in ledger.actions:
+        if a.kind == "shopping":
+            lines.append(f"🛒 Liste de courses enregistrée dans Radicale : {md_escape(a.label)}" if a.ok
+                         else f"❌ Liste de courses non enregistrée dans Radicale : {md_escape(a.detail)}")
     if truncated:
         lines.append("⚠️ Traitement interrompu (limite atteinte) : l'opération est peut-être incomplète, vérifie l'agenda.")
     if error:

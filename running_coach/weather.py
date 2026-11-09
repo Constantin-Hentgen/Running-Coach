@@ -54,17 +54,20 @@ def fetch_daily(fields: str = DAILY_FIELDS) -> list[dict]:
     return [item.get("daily", {}) for item in items]
 
 
-def fetch_hourly(days: int = 3) -> dict[str, list[tuple[datetime.datetime, int | None, float]]]:
-    """Par lieu : [(heure locale aware, probabilité de pluie %, précipitations mm), …]."""
+def fetch_hourly(days: int = 3) -> dict:
+    """Par lieu : liste d'`weather_alerts.Hour` (heure locale aware), depuis hier 00:00 (sol mouillé)."""
+    from .weather_alerts import Hour   # import local : weather_alerts ne dépend pas de weather
+
     locations = settings.weather_locations
     res = requests.get(
         settings.weather_api_url,
         params={
             "latitude": ",".join(str(lat) for _, lat, _ in locations),
             "longitude": ",".join(str(lon) for _, _, lon in locations),
-            "hourly": "precipitation_probability,precipitation",
+            "hourly": "precipitation_probability,precipitation,temperature_2m,apparent_temperature,wind_gusts_10m,weathercode",
             "timezone": settings.tz.key,   # heures renvoyées dans le fuseau du coach
             "forecast_days": days,
+            "past_days": 1,
         },
         timeout=settings.http_timeout,
     )
@@ -74,12 +77,22 @@ def fetch_hourly(days: int = 3) -> dict[str, list[tuple[datetime.datetime, int |
     out = {}
     for (name, _, _), item in zip(locations, items):
         h = item.get("hourly", {})
-        times, probs, mms = h.get("time") or [], h.get("precipitation_probability") or [], h.get("precipitation") or []
+
+        def col(key, i):
+            values = h.get(key) or []
+            return values[i] if i < len(values) else None
+
         out[name] = [
-            (datetime.datetime.fromisoformat(t).replace(tzinfo=settings.tz),
-             probs[i] if i < len(probs) else None,
-             (mms[i] if i < len(mms) else 0.0) or 0.0)
-            for i, t in enumerate(times)
+            Hour(
+                time=datetime.datetime.fromisoformat(t).replace(tzinfo=settings.tz),
+                probability=col("precipitation_probability", i),
+                mm=col("precipitation", i) or 0.0,
+                temp=col("temperature_2m", i),
+                feels=col("apparent_temperature", i),
+                gust=col("wind_gusts_10m", i),
+                code=col("weathercode", i),
+            )
+            for i, t in enumerate(h.get("time") or [])
         ]
     return out
 

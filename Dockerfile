@@ -13,6 +13,8 @@ COPY running_coach ./running_coach
 # /data : mémoire du coach + historique (volume nommé, hérite de ces droits à sa création)
 RUN useradd --system --no-create-home coach && mkdir -p /data && chown coach /data
 ENV COACH_DATA_DIR=/data
+# Modèle Whisper (vocaux) et cache Hugging Face dans le volume : téléchargés une fois, gardés entre redéploiements
+ENV HF_HOME=/data/huggingface
 VOLUME /data
 USER coach
 

@@ -16,6 +16,8 @@ dependencies = [
     "requests>=2.31.0",
     "tzdata",
     "mcp>=2.0",
+    "faster-whisper>=1.1",
+    "av>=11,<19",
 ]
 
 [dependency-groups]

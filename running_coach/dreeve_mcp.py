@@ -20,20 +20,10 @@ from .config import settings
 
 logger = logging.getLogger(__name__)
 
-# Outils utiles au coaching running. La charge et les derniers runs sont déjà
-# fournis dans le contexte : pas besoin de get_training_load / get_most_recent_activity.
-ALLOWED = {
-    "search_activities",
-    "get_activity_by_id",
-    "get_activity_laps",
-    "get_activity_splits",
-    "get_activity_streams",
-    "get_training_volume",
-    "get_heart_rate_zones",
-    "get_athlete_details",
-    "get_gear",
-    "get_streaks",
-}
+# Tous les outils Dreeve sont en lecture seule (doc Dreeve) : on les expose tous, pour que le
+# coach profite des métriques calculées par Dreeve (records, prédictions…) au lieu de les estimer.
+# Seuls ceux-ci sont retirés : leurs données sont déjà dans le contexte pré-chargé.
+EXCLUDED = {"get_training_load", "get_most_recent_activity"}
 MAX_RESULT_CHARS = 20_000
 PREFIX = "dreeve_"   # évite toute collision avec les outils locaux, et dit au modèle d'où vient la donnée
 
@@ -83,7 +73,7 @@ async def load_tools() -> list[dict]:
         logger.error(f"[DREEVE MCP] Connexion impossible ({settings.dreeve_mcp_url}) : {_root_cause(e)} — vérifie que "
                      "DREEVE_MCP_KEY (drvm_…, pas la clé REST drv_…) est définie ici ET dans le .env de Dreeve.")
         return []
-    tools = sorted((t for t in listed.tools if t.name in ALLOWED), key=lambda t: t.name)
+    tools = sorted((t for t in listed.tools if t.name not in EXCLUDED), key=lambda t: t.name)
     _catalog = [_to_anthropic(t) for t in tools]
     logger.info(f"[DREEVE MCP] {len(_catalog)} outil(s) : {', '.join(t.name for t in tools)}")
     return _catalog
@@ -109,7 +99,7 @@ class McpRun:
 
     async def call(self, tool_name: str, args: dict) -> dict:
         name = tool_name.removeprefix(PREFIX)
-        if name not in ALLOWED:
+        if name in EXCLUDED or (_catalog is not None and PREFIX + name not in {t["name"] for t in _catalog}):
             return {"ok": False, "error": f"outil Dreeve non autorisé : {name}"}
         try:
             if self._session is None:

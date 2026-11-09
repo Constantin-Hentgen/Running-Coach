@@ -1,28 +1,30 @@
-"""Telegram : messages entrants, commandes, briefing matinal, détection de nouveaux runs, alertes pluie."""
+"""Telegram : messages (texte et vocaux), commandes, boutons, briefing matinal, bilan hebdo,
+détection de nouveaux runs avec ressenti, alertes météo."""
 import asyncio
 import datetime
 import functools
 import logging
 
-from telegram import Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ChatAction, ParseMode
 from telegram.error import BadRequest
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
-from . import agent, commands, dreeve, rain_alerts, weather
+from . import agent, coaching, commands, dreeve, voice, weather, weather_alerts
 from . import calendar_store as cs
 from .config import TZ, settings
 from .formatting import md_escape, md_unescape, split_message
-from .memory import store
+from .memory import LEGS, store
 
 logger = logging.getLogger(__name__)
 
 MORNING_PROMPT = (
-    "Réalise le briefing matinal. Analyse l'agenda Radicale, la météo, la charge, le volume hebdo et les derniers runs Dreeve, "
-    f"en appliquant tout ce que tu sais de moi. Met à jour / planifie les {settings.planning_horizon_days} prochains jours dans Radicale. "
+    "Réalise le briefing matinal. Analyse l'agenda Radicale, la météo, la charge, le volume hebdo, les derniers runs Dreeve, "
+    "mes ressentis et le compte à rebours de mes objectifs, en appliquant tout ce que tu sais de moi. "
+    f"Met à jour / planifie les {settings.planning_horizon_days} prochains jours dans Radicale, en cohérence avec la "
+    "périodisation vers mon objectif principal. "
     "Fais un résumé Telegram ultra-concis, sobre, avec des descriptions structurées et des émojis."
 )
-
 
 DEBRIEF_PROMPT = (
     "{intro} :\n{runs}\n\n"
@@ -30,23 +32,71 @@ DEBRIEF_PROMPT = (
     "1. 🏃 *La séance* : ce qui était prévu dans l'agenda vs ce que j'ai fait. Regarde tours/splits via Dreeve si utile. "
     "Si la séance prévue était un jour passé, relis l'agenda de ce jour-là avec list_calendar_events.\n"
     "2. 📈 *Par rapport à mes performances passées* : compare avec mes séances similaires récentes "
-    "(allure, FC, dénivelé) et la tendance des dernières semaines ; signale un progrès net ou un signal d'alerte.\n"
-    "3. 🔋 *Forme et prochaines séances* : avec la charge (TSB, ratio A/C), la météo et ce qu'il y a dans l'agenda "
-    "les prochains jours, dis si le programme reste adapté. Si un ajustement est conseillé, propose-le précisément "
-    "(séance, jour, contenu) sans le faire : je validerai en répondant.\n"
-    "4. 🎯 *Objectifs* : où j'en suis par rapport à mes objectifs (mémoire, courses dans l'agenda) et le point clé "
+    "(allure, FC, dénivelé) et la tendance des dernières semaines, en t'appuyant sur les métriques Dreeve ; "
+    "signale un progrès net ou un signal d'alerte.\n"
+    "3. 🔋 *Forme et prochaines séances* : avec la charge (TSB, ratio A/C), mes ressentis, la météo et ce qu'il y a "
+    "dans l'agenda les prochains jours, dis si le programme reste adapté. Si un ajustement est conseillé, "
+    "enregistre-le avec propose_change sans le faire.\n"
+    "4. 🎯 *Objectifs* : où j'en suis par rapport à mes objectifs (compte à rebours, phase de préparation) et le point clé "
     "à travailler ensuite. Si tu ne connais aucun objectif, demande-le-moi en une phrase.\n"
     "Ne modifie pas l'agenda."
 )
 
+REVIEW_PROMPT = (
+    "Fais le bilan de ma semaine. Chiffres calculés par le système (fiables, ne les recalcule pas) :\n{adherence}\n\n"
+    "En 4 blocs courts et factuels :\n"
+    "1. 📊 *La semaine* : régularité (prévu vs fait), volume, intensité, ce qui a manqué et pourquoi c'est important ou non.\n"
+    "2. 🔋 *Forme* : charge Dreeve et ressentis (effort perçu, jambes) : fatigue qui s'accumule ou bonne assimilation ?\n"
+    "3. 🎯 *Objectifs* : où j'en suis (compte à rebours, phase de préparation) et ce que la semaine change.\n"
+    "4. 📅 *Semaine prochaine* : les 2-3 séances clés prévues dans l'agenda et l'intention de la semaine. "
+    "Si le programme mérite un ajustement, enregistre-le avec propose_change sans le faire.\n"
+    "Ne modifie pas l'agenda."
+)
 
-async def send_text(send, text: str) -> None:
-    """send : coroutine(text, **kwargs). Markdown d'abord, texte brut si Telegram refuse le balisage."""
-    for chunk in split_message(text):
+APPLY_PROMPT = "Applique maintenant cette proposition que tu m'as faite et que je valide : {text}"
+PAIN_FOLLOW_UP = ("😬 Où as-tu mal, depuis quand, et est-ce que ça gêne à la marche ? "
+                  "Réponds-moi (texte ou vocal), j'adapterai la suite.")
+
+
+async def send_text(send, text: str, reply_markup=None) -> None:
+    """send : coroutine(text, **kwargs). Markdown d'abord, texte brut si Telegram refuse le balisage.
+    Les boutons éventuels sont attachés au dernier morceau."""
+    chunks = split_message(text)
+    for i, chunk in enumerate(chunks):
+        extra = {"reply_markup": reply_markup} if reply_markup is not None and i == len(chunks) - 1 else {}
         try:
-            await send(chunk, parse_mode=ParseMode.MARKDOWN)
+            await send(chunk, parse_mode=ParseMode.MARKDOWN, **extra)
         except BadRequest:
-            await send(md_unescape(chunk))
+            await send(md_unescape(chunk), **extra)
+
+
+def proposals_markup(proposals: list[tuple[int, str]]) -> tuple[str, InlineKeyboardMarkup | None]:
+    """Pied de message listant les propositions (texte généré par le code) + boutons."""
+    if not proposals:
+        return "", None
+    if len(proposals) == 1:
+        pid, text = proposals[0]
+        footer = f"*💡 Proposition* : {md_escape(text)}"
+        rows = [[InlineKeyboardButton("✅ Appliquer", callback_data=f"p:a:{pid}"),
+                 InlineKeyboardButton("✏️ Ajuster", callback_data=f"p:e:{pid}"),
+                 InlineKeyboardButton("❌ Ignorer", callback_data=f"p:x:{pid}")]]
+        return footer, InlineKeyboardMarkup(rows)
+    lines = ["*💡 Propositions*"] + [f"{i}. {md_escape(text)}" for i, (_, text) in enumerate(proposals, 1)]
+    rows = [[InlineKeyboardButton(f"✅ {i}", callback_data=f"p:a:{pid}"),
+             InlineKeyboardButton(f"✏️ {i}", callback_data=f"p:e:{pid}"),
+             InlineKeyboardButton(f"❌ {i}", callback_data=f"p:x:{pid}")] for i, (pid, _) in enumerate(proposals, 1)]
+    return "\n".join(lines), InlineKeyboardMarkup(rows)
+
+
+def rpe_markup(activity_id) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton(str(n), callback_data=f"c:r:{activity_id}:{n}") for n in row]
+                                 for row in ((1, 2, 3, 4, 5), (6, 7, 8, 9, 10))])
+
+
+def legs_markup(activity_id) -> InlineKeyboardMarkup:
+    icons = {"fraiches": "🟢", "normales": "🟡", "lourdes": "🟠", "douleur": "🔴"}
+    return InlineKeyboardMarkup([[InlineKeyboardButton(f"{icons[k]} {label.capitalize()}", callback_data=f"c:l:{activity_id}:{k}")
+                                  for k, label in LEGS.items()]])
 
 
 class CoachBot:
@@ -55,8 +105,21 @@ class CoachBot:
         self.chat_id = settings.telegram_chat_id
         self._activity_lock = asyncio.Lock()   # jamais deux détections en parallèle (pas de double débrief)
 
-    async def _push(self, text: str) -> None:
-        await send_text(functools.partial(self.app.bot.send_message, chat_id=self.chat_id), text)
+    # --- Envoi ---------------------------------------------------------------
+
+    def _sender(self, update: Update | None = None):
+        if update is not None and update.effective_message is not None:
+            return update.effective_message.reply_text
+        return functools.partial(self.app.bot.send_message, chat_id=self.chat_id)
+
+    async def _push(self, text: str, reply_markup=None) -> None:
+        await send_text(self._sender(), text, reply_markup)
+
+    async def _deliver(self, reply: agent.AgentReply, header: str = "", update: Update | None = None) -> None:
+        """Réponse de l'agent + propositions (pied de message et boutons)."""
+        footer, markup = proposals_markup(reply.proposals)
+        text = "\n\n".join(part for part in (header, reply.text, footer) if part)
+        await send_text(self._sender(update), text, markup)
 
     async def _authorized(self, update: Update) -> bool:
         """Le bot peut modifier l'agenda : il ne répond qu'au chat TELEGRAM_CHAT_ID.
@@ -77,31 +140,65 @@ class CoachBot:
             return False
         return True
 
-    async def on_memory(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """/memory : ce que le coach a retenu (pour corriger : « oublie le #3 », « en fait je préfère… »)."""
-        if not update.message or not await self._authorized(update):
-            return
-        text = ("*🧠 Ce que je sais de toi*\n" + md_escape(store.render())
-                + "\n\n_Pour corriger : « oublie le #3 » ou dis-moi simplement ce qui a changé._")
-        await send_text(update.message.reply_text, text)
+    # --- Conversation --------------------------------------------------------
 
     async def on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.message or not update.message.text or not await self._authorized(update):
             return
         await self._ask_and_reply(update, update.message.text)
 
-    async def _ask_and_reply(self, update: Update, prompt: str, allow_writes: bool = True) -> None:
+    async def on_voice(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Vocal → transcription locale (Whisper) → traité comme un message écrit."""
+        if not update.message or not await self._authorized(update):
+            return
+        media = update.message.voice or update.message.audio
+        if not voice.enabled():
+            await update.message.reply_text("🎙️ Les messages vocaux sont désactivés (WHISPER_MODEL=off). Écris-moi plutôt.")
+            return
+        if media.duration and media.duration > voice.MAX_SECONDS:
+            await update.message.reply_text(f"🎙️ Vocal trop long (max {voice.MAX_SECONDS // 60} min). Fais plus court ou écris-moi.")
+            return
         typing = asyncio.create_task(self._keep_typing(update))
         try:
-            reply = await agent.ask(prompt, chat_id=str(update.effective_chat.id), allow_writes=allow_writes)
+            data = await (await media.get_file()).download_as_bytearray()
+            text = await asyncio.to_thread(voice.transcribe, bytes(data))
         except Exception as e:
-            logger.exception("Erreur non gérée")
-            reply = f"❌ Erreur technique : {type(e).__name__}. Rien n'est garanti côté Radicale, vérifie l'agenda."
+            logger.exception("Transcription en échec")
+            await update.message.reply_text(f"❌ Je n'ai pas pu transcrire ce vocal ({type(e).__name__}). Réessaie ou écris-moi.")
+            return
         finally:
             typing.cancel()
-        await send_text(update.message.reply_text, reply)
+        if not text:
+            await update.message.reply_text("🎙️ Je n'ai rien entendu de clair. Tu peux réessayer ?")
+            return
+        await update.message.reply_text(f"🎙️ « {text} »")
+        await self._ask_and_reply(update, text)
 
-    # --- Commandes ----------------------------------------------------------
+    async def _ask_and_reply(self, update: Update, prompt: str, allow_writes: bool = True,
+                             planning: bool = False, header: str = "") -> None:
+        typing = asyncio.create_task(self._keep_typing(update))
+        try:
+            reply = await agent.ask(prompt, chat_id=str(update.effective_chat.id), allow_writes=allow_writes, planning=planning)
+        except Exception as e:
+            logger.exception("Erreur non gérée")
+            reply = agent.AgentReply(f"❌ Erreur technique : {type(e).__name__}. Rien n'est garanti côté Radicale, vérifie l'agenda.")
+        finally:
+            typing.cancel()
+        await self._deliver(reply, header, update)
+
+    @staticmethod
+    async def _keep_typing(update: Update) -> None:
+        # L'indicateur « écrit… » expire après ~5 s : on le renouvelle pendant que l'agent travaille.
+        try:
+            while True:
+                await update.effective_chat.send_action(ChatAction.TYPING)
+                await asyncio.sleep(4)
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.debug("send_action échoué", exc_info=True)
+
+    # --- Commandes -----------------------------------------------------------
 
     async def _command(self, update: Update, build) -> None:
         """Commande instantanée : `build()` (synchrone, exécuté hors boucle) renvoie le texte Markdown."""
@@ -116,6 +213,15 @@ class CoachBot:
 
     async def on_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await self._command(update, lambda: commands.HELP_TEXT)
+
+    async def on_memory(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """/memory : ce que le coach a retenu (pour corriger : « oublie le #3 », « en fait je préfère… »)."""
+        await self._command(update, lambda: (
+            "*🧠 Ce que je sais de toi*\n" + md_escape(store.render())
+            + "\n\n_Pour corriger : « oublie le #3 » ou dis-moi simplement ce qui a changé._"))
+
+    async def on_goals(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        await self._command(update, lambda: commands.format_goals_reply(store.goals, datetime.datetime.now(TZ).date()))
 
     async def on_agenda(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         days = commands.parse_days(context.args or [])
@@ -157,41 +263,132 @@ class CoachBot:
             return
         prompt = DEBRIEF_PROMPT.format(intro="Débriefe ma dernière séance", runs=dreeve.format_activity(runs[0]))
         await self._ask_and_reply(update, prompt, allow_writes=False)
+        await self._ask_checkin(runs[0], only_if_missing=True)
 
     async def on_shopping(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.message or not await self._authorized(update):
             return
         days = commands.parse_days(context.args or [], commands.SHOPPING_DEFAULT_DAYS, commands.SHOPPING_MAX_DAYS)
-        prompt = commands.shopping_prompt(days, datetime.datetime.now(TZ).date())
+        prompt = commands.shopping_prompt(days, datetime.datetime.now(TZ).date(), bool(settings.radicale_tasks_url))
         await self._ask_and_reply(update, prompt, allow_writes=False)
 
     async def on_briefing(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.message or not await self._authorized(update):
             return
-        await self._ask_and_reply(update, MORNING_PROMPT.replace("le briefing matinal", "un briefing"))
+        await self._ask_and_reply(update, MORNING_PROMPT.replace("le briefing matinal", "un briefing"), planning=True)
 
-    @staticmethod
-    async def _keep_typing(update: Update) -> None:
-        # L'indicateur « écrit… » expire après ~5 s : on le renouvelle pendant que l'agent travaille.
+    async def on_review(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not update.message or not await self._authorized(update):
+            return
         try:
-            while True:
-                await update.message.chat.send_action(ChatAction.TYPING)
-                await asyncio.sleep(4)
-        except asyncio.CancelledError:
-            pass
+            prompt = await asyncio.to_thread(self._review_prompt)
+        except Exception as e:
+            await update.message.reply_text(f"❌ Bilan impossible : {e}")
+            return
+        await self._ask_and_reply(update, prompt, allow_writes=False, planning=True, header="📊 *Bilan de la semaine*")
+
+    # --- Boutons -------------------------------------------------------------
+
+    async def on_button(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        query = update.callback_query
+        if not query or not await self._authorized(update):
+            return
+        parts = (query.data or "").split(":")
+        try:
+            if parts[0] == "p":
+                await self._on_proposal(update, parts[1], parts[2])
+            elif parts[0] == "c":
+                await self._on_checkin(update, parts[1], parts[2], parts[3])
+            else:
+                await query.answer()
         except Exception:
-            logger.debug("send_action échoué", exc_info=True)
+            logger.exception(f"Bouton en échec : {query.data}")
+            await query.answer("❌ Erreur technique", show_alert=True)
+
+    async def _on_proposal(self, update: Update, action: str, pid: str) -> None:
+        query = update.callback_query
+        status = {"a": "applied", "e": "adjusting", "x": "ignored"}[action]
+        item = store.close_proposal(pid, status)
+        if item is None:
+            await query.answer("Déjà traité.")
+            return
+        await query.answer()
+        await query.edit_message_reply_markup(None)   # plus de double clic possible
+        if action == "a":
+            prompt = item["text"] if item["kind"] == "weather" else APPLY_PROMPT.format(text=item["text"])
+            await self._ask_and_reply(update, prompt)
+        elif action == "e":
+            await agent.add_to_history(self.chat_id, f"[L'athlète veut ajuster ta proposition : {item['text']}]",
+                                       "Dis-moi ce que tu veux changer.")
+            await self._push("✏️ Dis-moi ce que tu veux changer (texte ou vocal), je m'adapte.")
+        else:
+            await agent.add_to_history(self.chat_id, f"[L'athlète a ignoré ta proposition : {item['text']}]",
+                                       "D'accord, on garde le programme tel quel.")
+            await self._push("👍 On garde le programme tel quel.")
+
+    async def _on_checkin(self, update: Update, step: str, activity_id: str, value: str) -> None:
+        query = update.callback_query
+        await query.answer()
+        if step == "r":
+            rpe = int(value)
+            store.set_checkin(activity_id, rpe=rpe)
+            await query.edit_message_text(
+                f"📝 Effort noté : *{rpe}/10* ({coaching.RPE_LABELS[rpe]})\n🦵 Et les jambes ?",
+                parse_mode=ParseMode.MARKDOWN, reply_markup=legs_markup(activity_id))
+        elif step == "l" and value in LEGS:
+            item = store.set_checkin(activity_id, legs=value)
+            rpe = f"effort {item['rpe']}/10, " if item.get("rpe") else ""
+            await query.edit_message_text(f"📝 Ressenti noté : {rpe}jambes {LEGS[value]} ✅")
+            if value == "douleur":
+                await agent.add_to_history(self.chat_id, "[Ressenti après séance : douleur signalée]", PAIN_FOLLOW_UP)
+                await self._push(PAIN_FOLLOW_UP)
+
+    async def _ask_checkin(self, run: dict, only_if_missing: bool = False) -> None:
+        """Demande l'effort perçu (1-10) puis l'état des jambes, par boutons."""
+        activity_id = run.get("id")
+        if activity_id is None or len(f"c:r:{activity_id}:10") > 64:   # limite Telegram des données de bouton
+            return
+        existing = store.state["checkins"].get(str(activity_id), {})
+        if only_if_missing and existing.get("rpe"):
+            return
+        store.set_checkin(activity_id, date=(run.get("startDateLocal") or "")[:10] or None,
+                          minutes=round((run.get("movingTimeInSeconds") or 0) / 60), name=run.get("name"))
+        await self._push(f"📝 *Ton ressenti sur « {md_escape(run.get('name') or 'ta séance')} »*\n"
+                         "Effort perçu, de 1 (très facile) à 10 (maximal) :", rpe_markup(activity_id))
+
+    # --- Tâches planifiées ---------------------------------------------------
 
     async def morning_briefing(self) -> None:
         try:
-            reply = await agent.ask(MORNING_PROMPT, chat_id=self.chat_id)
+            reply = await agent.ask(MORNING_PROMPT, chat_id=self.chat_id, planning=True)
         except Exception as e:
             logger.exception("Briefing matinal en échec")
-            reply = f"❌ Briefing matinal impossible : {type(e).__name__}"
-        await self._push(reply)
+            reply = agent.AgentReply(f"❌ Briefing matinal impossible : {type(e).__name__}")
+        await self._deliver(reply)
 
-    async def check_rain(self) -> None:
-        """Prévient (une fois par séance) s'il va pleuvoir pendant une séance planifiée."""
+    def _review_prompt(self) -> str:
+        """Prévu (agenda) vs fait (Dreeve) sur la semaine en cours, calculé par le code."""
+        today = datetime.datetime.now(TZ).date()
+        monday, sunday = coaching.week_bounds(today)
+        start = datetime.datetime.combine(monday, datetime.time.min, tzinfo=TZ)
+        events, _ = cs.list_events(start, start + datetime.timedelta(days=7))
+        planned = [ev for ev in events if weather_alerts.is_training(
+            ev, datetime.datetime.fromisoformat(ev["start"]), datetime.datetime.fromisoformat(ev["end"]))]
+        runs = dreeve.get_runs_since_weeks(1)[0] if settings.dreeve_enabled else []
+        stats = coaching.adherence(planned, runs, monday)
+        return REVIEW_PROMPT.format(adherence=coaching.format_adherence(stats))
+
+    async def weekly_review(self) -> None:
+        try:
+            prompt = await asyncio.to_thread(self._review_prompt)
+            reply = await agent.ask(prompt, chat_id=self.chat_id, allow_writes=False, planning=True)
+        except Exception as e:
+            logger.exception("Bilan hebdo en échec")
+            reply = agent.AgentReply(f"❌ Bilan de la semaine impossible : {type(e).__name__}")
+        await self._deliver(reply, header="📊 *Bilan de la semaine*")
+
+    async def check_weather(self) -> None:
+        """Prévient (une fois par risque et par séance) en cas de pluie, chaleur, vent ou verglas, et quand ça s'arrange."""
         try:
             now = datetime.datetime.now(TZ)
             horizon = now + datetime.timedelta(hours=settings.rain_hours_ahead)
@@ -201,21 +398,27 @@ class CoachBot:
                 asyncio.to_thread(weather.fetch_hourly, days),
             )
         except Exception as e:
-            logger.error(f"Alerte pluie : vérification impossible : {e}")
+            logger.error(f"Alerte météo : vérification impossible : {e}")
             return
-        for alert in rain_alerts.find_alerts(events, forecasts, now, store.was_alerted):
-            text = rain_alerts.format_alert(alert, now)
+        for notice in weather_alerts.find_notices(events, forecasts, now, store.alert_state):
+            text = weather_alerts.format_notice(notice, now)
+            markup = None
+            if notice.kind == "alert":
+                pid = store.add_proposal(weather_alerts.adapt_prompt(notice), kind="weather")
+                markup = InlineKeyboardMarkup([[InlineKeyboardButton("🔁 Adapter", callback_data=f"p:a:{pid}"),
+                                                InlineKeyboardButton("👍 Je garde", callback_data=f"p:x:{pid}")]])
             try:
-                await self._push(text)
+                await self._push(text, markup)
             except Exception:
-                logger.exception("Alerte pluie : envoi Telegram en échec")
+                logger.exception("Alerte météo : envoi Telegram en échec")
                 continue
-            store.mark_alerted(alert.key, alert.end)
+            store.save_alert_state(notice.key, notice.end, notice.signalled, cleared=notice.kind == "clear")
             await agent.add_to_history(self.chat_id, "[Alerte météo automatique envoyée par le système]", text)
-            logger.info(f"Alerte pluie envoyée : {alert.summary} ({alert.place}, {alert.risk})")
+            logger.info(f"Alerte météo ({notice.kind}) : {notice.summary} ({notice.place}, {sorted(notice.hazards) or notice.cleared})")
 
     async def check_new_activity(self, source: str = "polling") -> bool:
-        """Débriefe chaque run apparu dans Dreeve depuis le dernier vu. Retourne True si un run a été trouvé."""
+        """Débriefe chaque run apparu dans Dreeve depuis le dernier vu, puis demande le ressenti.
+        Retourne True si un run a été trouvé."""
         async with self._activity_lock:
             try:
                 runs = await asyncio.to_thread(dreeve.get_recent_runs)
@@ -238,7 +441,8 @@ class CoachBot:
                                            runs="\n".join(dreeve.format_activity(r) for r in fresh))
             try:
                 reply = await agent.ask(prompt, chat_id=self.chat_id, allow_writes=False)
-                await self._push(f"⚡ *Nouveau run détecté !*\n\n{reply}")
+                await self._deliver(reply, header="⚡ *Nouveau run détecté !*")
+                await self._ask_checkin(fresh[-1])
             except Exception:
                 logger.exception("Débrief de séance en échec")
             return True
@@ -248,11 +452,13 @@ def build_bot() -> CoachBot:
     app = Application.builder().token(settings.telegram_bot_token).build()
     bot = CoachBot(app)
     handlers = {
-        "plan": bot.on_agenda, "load": bot.on_form, "runs": bot.on_last_runs,
-        "weather": bot.on_weather, "memory": bot.on_memory, "debrief": bot.on_debrief,
+        "plan": bot.on_agenda, "load": bot.on_form, "runs": bot.on_last_runs, "weather": bot.on_weather,
+        "goals": bot.on_goals, "memory": bot.on_memory, "debrief": bot.on_debrief, "review": bot.on_review,
         "shopping": bot.on_shopping, "briefing": bot.on_briefing, "help": bot.on_help,
     }
     for name, aliases, _ in commands.COMMANDS:
         app.add_handler(CommandHandler([name, *aliases], handlers[name]))
+    app.add_handler(CallbackQueryHandler(bot.on_button))
+    app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, bot.on_voice))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot.on_message))
     return bot

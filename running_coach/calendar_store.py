@@ -13,7 +13,7 @@ import uuid
 
 import caldav
 from caldav.lib.error import NotFoundError
-from icalendar import Calendar, Event
+from icalendar import Calendar, Event, Todo
 
 from .config import FR_DAYS, TZ, UTC, settings
 
@@ -258,3 +258,65 @@ def delete_event(uid: str) -> dict:
     except LookupError:
         return {"uid": uid, "summary": summary, "start": start, "end": end}
     raise RuntimeError("l'événement est toujours présent sur Radicale après suppression")
+
+
+# ---------------------------------------------------------------------------
+# Liste de courses : tâches (VTODO) dans une liste dédiée (RADICALE_TASKS_URL)
+# ---------------------------------------------------------------------------
+
+SHOPPING_UID_SUFFIX = "@running-coach-shopping"
+
+
+@functools.cache
+def get_tasks_list():
+    client = caldav.DAVClient(url=settings.radicale_tasks_url, username=settings.radicale_user,
+                              password=settings.radicale_pass)
+    return client.calendar(url=settings.radicale_tasks_url)
+
+
+def build_todo(uid: str, summary: str, category: str | None = None) -> str:
+    cal = Calendar()
+    cal.add("prodid", "-//running-coach-agent//FR")
+    cal.add("version", "2.0")
+    todo = Todo()
+    todo.add("uid", uid)
+    todo.add("dtstamp", now_utc())
+    todo.add("summary", summary)
+    todo.add("status", "NEEDS-ACTION")
+    if category:
+        todo.add("categories", [category])
+    cal.add_component(todo)
+    return cal.to_ical().decode("utf-8")
+
+
+def _coach_todos() -> list:
+    found = []
+    for obj in get_tasks_list().todos(include_completed=True):
+        try:
+            uid = next(str(c.get("UID", "")) for c in Calendar.from_ical(obj.data).walk("VTODO"))
+        except Exception:
+            continue
+        if uid.endswith(SHOPPING_UID_SUFFIX):
+            found.append(obj)
+    return found
+
+
+def replace_shopping_list(items: list[tuple[str, str | None]]) -> dict:
+    """Remplace la liste précédente du coach par `items` [(libellé, rayon)] ; relu sur le serveur.
+
+    Seules les tâches créées par le coach (UID …@running-coach-shopping) sont supprimées :
+    ce que tu as ajouté toi-même à la liste n'est jamais touché.
+    """
+    if not items:
+        raise ValueError("liste vide")
+    removed = 0
+    for obj in _coach_todos():
+        obj.delete()
+        removed += 1
+    tasks = get_tasks_list()
+    for label, aisle in items:
+        tasks.add_todo(build_todo(f"{uuid.uuid4()}{SHOPPING_UID_SUFFIX}", label, aisle))
+    saved = len(_coach_todos())
+    if saved != len(items):
+        raise RuntimeError(f"relecture : {saved} article(s) sur le serveur au lieu de {len(items)}")
+    return {"saved": saved, "removed": removed}

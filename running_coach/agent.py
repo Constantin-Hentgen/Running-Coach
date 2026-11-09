@@ -4,11 +4,12 @@ import datetime
 import json
 import logging
 import re
+from dataclasses import dataclass, field
 
 import anthropic
 
 from . import calendar_store as cs
-from . import dreeve, dreeve_mcp, weather
+from . import coaching, dreeve, dreeve_mcp, weather
 from .config import FR_DAYS_LONG, TZ, TZ_LABEL, UTC, settings
 from .memory import store
 from .tools import ALL_TOOLS, READ_ONLY_TOOLS, Ledger, build_report, run_tool
@@ -31,6 +32,17 @@ MÉMOIRE (tu apprends l'athlète au fil du temps) :
 - Tu peux aussi mémoriser une habitude clairement observée dans ses données (source "observation"), seulement si elle est nette et répétée.
 - Ne mémorise jamais l'éphémère ni ce qui est déjà en mémoire.
 
+OBJECTIFS ET PÉRIODISATION :
+- Le bloc « OBJECTIFS » liste les objectifs structurés (courses, santé) ; le contexte donne le compte à rebours. Toute planification part de l'objectif principal (priorité A, sinon le plus proche) : construis à rebours foncier → développement → spécifique → affûtage (environ 2 semaines avant un semi, 3 avant un marathon, avec volume réduit et intensité conservée), une semaine allégée toutes les 3 à 4 semaines, et récupération après la course.
+- Quand l'athlète annonce une course, un chrono ou un objectif santé daté, enregistre-le avec `set_goal` (pas `remember`). Si un souvenir « objectif » décrit en fait une course datée, propose de le convertir.
+- Pour les objectifs santé (poids, sommeil…), relie conseils d'entraînement et de nutrition.
+
+RESSENTI APRÈS SÉANCE :
+- Le contexte donne les ressentis récents (effort perçu 1-10, état des jambes). Ils pèsent autant que la charge Dreeve : effort élevé sur une séance censée être facile, jambes lourdes répétées ou douleur = signal de fatigue, allège.
+
+PROPOSITIONS :
+- Quand tu suggères un changement d'agenda sans le faire (débrief, bilan, alerte, ou quand tu demandes confirmation), appelle `propose_change` avec un texte autonome et précis : l'athlète aura des boutons Appliquer / Ajuster / Ignorer. Dans ta réponse, résume la proposition en une ligne.
+
 MÉTHODE POUR MODIFIER L'AGENDA :
 - Les événements existants sont fournis avec leur UID. Identifie précisément ceux à toucher (dates + titre) et opère par UID.
 - Pour "refaire une semaine" : 1) supprime uniquement les événements concernés de la période, 2) crée les nouveaux, 3) si utile, appelle list_calendar_events pour relire la période.
@@ -44,6 +56,7 @@ MÉTÉO :
 DONNÉES DREEVE (lecture seule) :
 - La charge, le volume hebdo et les derniers runs (avec leur id) sont fournis dans le contexte : ne les redemande pas.
 - Pour aller plus loin, utilise les outils `dreeve_*` : tours/splits/streams d'une séance (débrief), zones cardio (allures et intensités), volume sur une période, recherche d'activités anciennes, chaussures (usure).
+- Les métriques de performance (records, prédictions de temps, efficacité, tendances…) viennent des outils `dreeve_*` quand ils les fournissent : ne les recalcule pas toi-même et ne les invente pas.
 
 NUTRITION :
 - Tu conseilles aussi l'alimentation, au service des objectifs sportifs ET de santé de la mémoire, en tenant compte des séances prévues (jours durs ou longs : plus de glucides et de récupération ; repos : plus léger).
@@ -59,11 +72,19 @@ _client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
 _lock = asyncio.Lock()   # une seule exécution à la fois : pas d'écritures concurrentes
 
 
+@dataclass
+class AgentReply:
+    """Texte à envoyer (compte-rendu inclus) + propositions enregistrées pendant le run [(id, texte)]."""
+    text: str
+    proposals: list[tuple[int, str]] = field(default_factory=list)
+
+
 def _system_blocks() -> list[dict]:
-    # Bloc 1 figé ; bloc 2 ne change que lorsque la mémoire change → préfixe de cache stable.
+    # Bloc 1 figé ; bloc 2 ne change que lorsque la mémoire ou les objectifs changent → préfixe de cache stable.
     return [
         {"type": "text", "text": SYSTEM_PROMPT},
-        {"type": "text", "text": f"CE QUE TU SAIS DE L'ATHLÈTE (mémoire durable) :\n{store.render()}"},
+        {"type": "text", "text": f"CE QUE TU SAIS DE L'ATHLÈTE (mémoire durable) :\n{store.render()}\n\n"
+                                 f"OBJECTIFS :\n{store.render_goals()}"},
     ]
 
 
@@ -91,6 +112,8 @@ async def _gather_context() -> str:
     return (
         "DONNÉES EN TEMPS RÉEL DU SYSTÈME :\n"
         f"- Date et heure actuelles : {FR_DAYS_LONG[now.weekday()]} {now:%d/%m/%Y %H:%M} ({TZ_LABEL})\n"
+        f"- Objectifs (compte à rebours) :\n{coaching.goals_context(store.goals, now.date())}\n"
+        f"- Ressentis après séance (14 derniers jours) :\n{coaching.checkins_context(store.recent_checkins(14, now.date()))}\n"
         f"- Prévisions météo :{forecast}\n"
         f"- Agenda Radicale {agenda}\n"
         f"- Dreeve :\n{dreeve_text}"
@@ -101,7 +124,7 @@ def _text_of(response) -> str:
     return "\n".join(b.text for b in response.content if b.type == "text").strip()
 
 
-async def _run_loop(messages: list, tools: list, ledger: Ledger) -> tuple[str, bool]:
+async def _run_loop(messages: list, tools: list, ledger: Ledger, model: str) -> tuple[str, bool]:
     """Boucle outils. Retourne (texte final, tronqué ?)."""
     allowed = {t["name"] for t in tools}
     system = _system_blocks()   # figé pour tout le run (un `remember` s'appliquera au prochain message)
@@ -110,7 +133,7 @@ async def _run_loop(messages: list, tools: list, ledger: Ledger) -> tuple[str, b
         async with dreeve_mcp.McpRun() as mcp:
             for _ in range(settings.max_tool_rounds):
                 response = await _client.messages.create(
-                    model=settings.model,
+                    model=model,
                     max_tokens=settings.max_output_tokens,
                     system=system,
                     tools=tools,
@@ -159,11 +182,14 @@ async def add_to_history(chat_id: str, note: str, message: str) -> None:
         store.set_history(chat_id, history[-settings.history_messages:])
 
 
-async def ask(user_prompt: str, chat_id: str = "default", allow_writes: bool = True) -> str:
-    """Point d'entrée unique : renvoie le texte à envoyer sur Telegram (compte-rendu inclus).
+async def ask(user_prompt: str, chat_id: str = "default", allow_writes: bool = True,
+              planning: bool = False) -> AgentReply:
+    """Point d'entrée unique : renvoie le texte à envoyer sur Telegram (compte-rendu inclus) et les propositions.
 
-    allow_writes=False : pas d'outils d'écriture d'agenda (la mémoire et la lecture restent permises).
+    allow_writes=False : pas d'outils d'écriture d'agenda (mémoire, objectifs, propositions et lecture restent permis).
+    planning=True : modèle de planification (CLAUDE_PLANNING_MODEL), pour les briefings et bilans.
     """
+    model = settings.planning_model if planning else settings.model
     async with _lock:
         ledger = Ledger()
         reply, truncated, error = "", False, None
@@ -172,13 +198,14 @@ async def ask(user_prompt: str, chat_id: str = "default", allow_writes: bool = T
             tools = (ALL_TOOLS if allow_writes else READ_ONLY_TOOLS) + mcp_tools
             messages = store.history(chat_id)
             messages.append({"role": "user", "content": f"{context}\n\nMessage de l'utilisateur : \"{user_prompt}\""})
-            reply, truncated = await _run_loop(messages, tools, ledger)
+            reply, truncated = await _run_loop(messages, tools, ledger, model)
         except Exception as e:
             logger.exception("Erreur dans la boucle agent")
             error = f"{type(e).__name__}: {e}"
 
         calendar_actions = [a for a in ledger.actions if a.kind in ("create", "update", "delete")]
-        if not calendar_actions and CLAIM_PATTERN.search(reply):
+        proposals = [(int(a.detail), a.label) for a in ledger.actions if a.kind == "proposal"]
+        if not calendar_actions and not proposals and CLAIM_PATTERN.search(reply):
             reply += "\n\n⚠️ Aucune modification de l'agenda n'a réellement été effectuée dans Radicale."
         elif not reply and not ledger.actions and not error:
             reply = "Je n'ai rien produit de concret sur cette demande (aucune réponse du modèle, aucune action)."
@@ -193,6 +220,6 @@ async def ask(user_prompt: str, chat_id: str = "default", allow_writes: bool = T
         ]
         store.set_history(chat_id, history[-settings.history_messages:])
 
-        logger.info(f"Agent terminé : {ledger.ok_count}/{len(ledger)} action(s) réussie(s), "
-                    f"truncated={truncated}, error={error}")
-        return final_text
+        logger.info(f"Agent terminé ({model}) : {ledger.ok_count}/{len(ledger)} action(s) réussie(s), "
+                    f"{len(proposals)} proposition(s), truncated={truncated}, error={error}")
+        return AgentReply(final_text, proposals)

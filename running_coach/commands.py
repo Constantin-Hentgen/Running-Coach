@@ -4,6 +4,7 @@ from itertools import groupby
 
 from telegram import BotCommand
 
+from .coaching import format_goals
 from .config import FR_DAYS
 from .dreeve import format_activity, weekly_volume
 from .formatting import md_escape
@@ -19,8 +20,10 @@ COMMANDS = [
     ("load", [], "Charge d'entraînement et volume récent"),
     ("runs", [], "Tes derniers runs"),
     ("weather", [], "Prévisions par lieu d'entraînement"),
+    ("goals", [], "Tes objectifs et le compte à rebours"),
     ("memory", [], "Ce que le coach sait de toi"),
     ("debrief", [], "Débrief IA de ton dernier run"),
+    ("review", [], "Bilan IA de la semaine (prévu vs fait)"),
     ("shopping", [], "Liste de courses selon tes objectifs (7 j, ou /shopping 3)"),
     ("briefing", [], "Briefing IA complet et ajustement du programme"),
     ("help", ["start"], "Liste des commandes"),
@@ -36,16 +39,20 @@ HELP_TEXT = """🏃 *Ton coach running*
 /load — charge d'entraînement (TSB, ratio A/C) et volume
 /runs — tes 5 derniers runs
 /weather — prévisions par lieu
+/goals — tes objectifs et le compte à rebours
 /memory — ce que je sais de toi
 
 *Avec le coach* (IA)
 /debrief — débrief de ton dernier run
+/review — bilan de la semaine : prévu vs fait, forme, semaine prochaine
 /shopping — liste de courses pour 7 jours selon tes objectifs sportifs et santé (/shopping 3 pour 3 jours)
 /briefing — briefing complet, ajuste le programme dans l'agenda
 
 /help — cette aide
 
-_Automatique : débrief après chaque run, briefing chaque matin, alerte si pluie sur une séance._"""
+Tu peux aussi m'envoyer des *vocaux* 🎙️. Quand je propose un changement, des boutons te permettent de l'appliquer.
+
+_Automatique : débrief et ressenti après chaque run, briefing chaque matin, bilan le dimanche soir, alerte météo (pluie, chaleur, vent, verglas) sur tes séances._"""
 
 
 def parse_days(args: list[str], default: int = AGENDA_DEFAULT_DAYS, maximum: int = AGENDA_MAX_DAYS) -> int:
@@ -57,7 +64,15 @@ def parse_days(args: list[str], default: int = AGENDA_DEFAULT_DAYS, maximum: int
     return max(1, min(days, maximum))
 
 
-def shopping_prompt(days: int, today: datetime.date) -> str:
+def format_goals_reply(goals: list[dict], today: datetime.date) -> str:
+    if not goals:
+        return ("🎯 *Objectifs*\nAucun objectif enregistré. Dis-moi simplement ta prochaine course (date, distance, chrono "
+                "visé) ou un objectif santé, je l'enregistre et je construis le plan à rebours.")
+    return ("🎯 *Objectifs*\n" + md_escape(format_goals(goals, today))
+            + "\n\n_Pour modifier : « décale mon semi au 14 mars », « vise plutôt 1h50 », « j'abandonne le trail »._")
+
+
+def shopping_prompt(days: int, today: datetime.date, save_to_tasks: bool = False) -> str:
     end = today + datetime.timedelta(days=days - 1)
     return (
         f"Prépare ma liste de courses pour {days} jour{'s' if days > 1 else ''}, du {_day_label(today)} au {_day_label(end)} inclus.\n"
@@ -71,6 +86,8 @@ def shopping_prompt(days: int, today: datetime.date) -> str:
         "- Au plus 3 repères pratiques liés aux séances (ex. collation avant le fractionné de mardi).\n"
         "S'il te manque une information essentielle (nombre de personnes, régime, allergies), fais une hypothèse raisonnable, "
         "dis-la en une ligne et demande-la-moi. Ne modifie pas l'agenda."
+        + (" Une fois la liste finalisée, enregistre-la aussi avec save_shopping_list (mêmes articles et rayons)."
+           if save_to_tasks else "")
     )
 
 

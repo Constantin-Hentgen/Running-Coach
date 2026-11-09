@@ -59,7 +59,7 @@ def test_ask_learns_preference_and_routes_mcp(tmp_path, monkeypatch):
     fake = FakeMessages([tool_round, final])
     monkeypatch.setattr(agent, "_client", NS(messages=fake))
 
-    out = asyncio.run(agent.ask("Je préfère faire mon fractionné le mardi soir", chat_id="42"))
+    out = asyncio.run(agent.ask("Je préfère faire mon fractionné le mardi soir", chat_id="42")).text
 
     assert "🧠 Noté" in out and "fractionné le mardi soir" in out
     assert "Aucune modification" not in out
@@ -68,6 +68,7 @@ def test_ask_learns_preference_and_routes_mcp(tmp_path, monkeypatch):
     # le prompt système contient la mémoire, et le cache est demandé
     first = fake.calls[0]
     assert "lundi, mercredi et vendredi" in first["system"][1]["text"]
+    assert first["model"] == agent.settings.model   # conversation : modèle par défaut
     assert first["cache_control"] == {"type": "ephemeral"}
     # résultats d'outils renvoyés dans un seul message utilisateur
     tool_results = fake.calls[1]["messages"][-1]["content"]
@@ -95,3 +96,33 @@ def test_read_only_mode_hides_calendar_writes(tmp_path, monkeypatch):
     asyncio.run(agent.ask("debrief", chat_id="1", allow_writes=False))
     names = {t["name"] for t in fake.calls[0]["tools"]}
     assert "create_calendar_event" not in names and "remember" in names
+
+
+def test_planning_model_and_proposal_without_false_claim_warning(tmp_path, monkeypatch):
+    store = Store(tmp_path / "state.json")
+    monkeypatch.setattr(agent, "store", store)
+    monkeypatch.setattr(tools, "store", store)
+
+    async def fake_context():
+        return "CONTEXTE"
+
+    async def no_tools():
+        return []
+
+    monkeypatch.setattr(agent, "_gather_context", fake_context)
+    monkeypatch.setattr(dreeve_mcp, "load_tools", no_tools)
+    propose = NS(stop_reason="tool_use", usage=_usage(), content=[
+        NS(type="tool_use", id="p1", name="propose_change", input={"change": "Déplacer le seuil de jeudi à vendredi 18:00"}),
+    ])
+    final = NS(stop_reason="end_turn", usage=_usage(),
+               content=[NS(type="text", text="Je te propose de déplacer le seuil à vendredi.")])
+    fake = FakeMessages([propose, final])
+    monkeypatch.setattr(agent, "_client", NS(messages=fake))
+
+    reply = asyncio.run(agent.ask("bilan", chat_id="1", allow_writes=False, planning=True))
+    assert fake.calls[0]["model"] == agent.settings.planning_model
+    assert len(reply.proposals) == 1 and reply.proposals[0][1] == "Déplacer le seuil de jeudi à vendredi 18:00"
+    assert store.proposal(reply.proposals[0][0])["status"] == "open"
+    assert "Aucune modification" not in reply.text   # « déplacer » proposé, pas prétendu fait
+    names = {t["name"] for t in fake.calls[0]["tools"]}
+    assert {"propose_change", "set_goal", "remove_goal"} <= names and "create_calendar_event" not in names

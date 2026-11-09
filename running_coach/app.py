@@ -71,8 +71,12 @@ async def lifespan(_: FastAPI):
                 hour, minute = settings.briefing_time
                 scheduler.add_job(bot.morning_briefing, "cron", hour=hour, minute=minute,
                                   misfire_grace_time=3600, coalesce=True)
+            if settings.weekly_review:
+                dow, hour, minute = settings.weekly_review
+                scheduler.add_job(bot.weekly_review, "cron", day_of_week=dow, hour=hour, minute=minute,
+                                  misfire_grace_time=3600, coalesce=True)
             if settings.weather_enabled and settings.radicale_url and settings.rain_check_minutes > 0:
-                scheduler.add_job(bot.check_rain, "interval", minutes=settings.rain_check_minutes, coalesce=True,
+                scheduler.add_job(bot.check_weather, "interval", minutes=settings.rain_check_minutes, coalesce=True,
                                   next_run_time=datetime.datetime.now(settings.tz) + datetime.timedelta(minutes=1))
             if settings.dreeve_enabled and settings.activity_poll_minutes > 0:
                 scheduler.add_job(bot.check_new_activity, "interval", minutes=settings.activity_poll_minutes, coalesce=True,
