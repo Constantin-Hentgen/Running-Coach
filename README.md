@@ -28,7 +28,7 @@ Coach▸ Dimanche est sec (12°C, vent faible) : sortie longue déplacée à 9h0
 - **One-tap proposals**: when the coach suggests a change without making it, buttons let you ✅ apply, ✏️ adjust or ❌ ignore it.
 - **Voice messages**: talk to the coach; voice notes are transcribed **locally** with Whisper, nothing leaves your server.
 - **Persistent memory**: the coach remembers your preferences, habits, constraints, goals, injuries, food preferences and gear, and applies them every time it plans.
-- **Nutrition**: `/shopping` gives a shopping list for the coming days, matched to your sport and health goals and to the sessions in your calendar, and can save it as a checkable task list in Radicale.
+- **Nutrition**: `/shopping` gives a shopping list for the coming days, matched to your sport and health goals and to the sessions in your calendar, and can put it in your shopping calendar as an event with the checklist.
 - **Weather alerts**: a Telegram message when rain, heat, strong gusts or ice are forecast during an upcoming session, with your other training place's forecast for comparison, an « Adapter » button, and a « bonne nouvelle » message if the forecast improves.
 - **Weather per training place** (e.g. home and work): each session is planned with the forecast for where you'll actually run that day.
 - **Real data**: training load (CTL/ATL/TSB, acute:chronic ratio), weekly volume, recent runs, plus every metric Dreeve's MCP server exposes (laps, zones, records…): the coach uses Dreeve's numbers instead of estimating its own.
@@ -127,7 +127,7 @@ To update: *Pull and redeploy* (no need to re-pull images, the image is built fr
 
 | Variable | Default | Description |
 |---|---|---|
-| `RADICALE_TASKS_URL` | `RADICALE_URL` | Where `/shopping` saves the list as checkable tasks (VTODO), e.g. for Tasks.org + DAVx⁵ on Android or Reminders on iPhone. By default the calendar's own collection, which Radicale lets hold events, journals and tasks together; set another **full** URL for a separate task list, or `off` to keep the list in Telegram only. Each new list replaces only the items the coach created; your own tasks are never touched |
+| `RADICALE_SHOPPING_URL` | — | **Full** URL of your dedicated **shopping calendar** (not the training one). `/shopping` creates **one event** there at your shopping time, with the checklist by aisle in its description, so it shows up in any calendar app. Each new list replaces the coach's previous upcoming list; your own events there are never touched. Empty = list in Telegram only. The older name `RADICALE_TASKS_URL` is still accepted |
 
 ### Dreeve
 
@@ -210,7 +210,7 @@ Just talk to it (in French), for example:
 | `/memory` | Shows everything the coach knows about you, with each memory's number |
 | `/debrief` | AI debrief of your latest run (same 4 parts as the automatic one, read-only), then the check-in if not done yet |
 | `/review` | AI review of the current week: planned vs done, form, goals, next week |
-| `/shopping` | AI shopping list for the next 7 days (`/shopping 3` for 3, max 14), built from your sport and health goals, food preferences in memory, and the sessions planned over that period; also saved as checkable tasks in Radicale (`RADICALE_TASKS_URL`) |
+| `/shopping` | AI shopping list for the next 7 days (`/shopping 3` for 3, max 14), built from your sport and health goals, food preferences in memory, and the sessions planned over that period; also saved as an event in your shopping calendar (`RADICALE_SHOPPING_URL`) at your shopping time, e.g. *« mets-la à 15h »* |
 | `/briefing` | Runs the full briefing now: reviews everything and adjusts the plan in your calendar |
 | `/help` (or `/start`) | Lists the commands |
 
@@ -335,7 +335,7 @@ Tests need no keys and no network: Claude, Dreeve and MCP calls are mocked. They
 | `[RADICALE] Échec de connexion CalDAV` | `RADICALE_URL` must point to the **calendar** (with its ID), not the server root |
 | Sessions are one hour off | Check `COACH_TZ` |
 | No weather in replies | `WEATHER_LOCATIONS` empty or malformed (startup fails with an explicit message if the format is wrong) |
-| `❌ Liste de courses non enregistrée dans Radicale` | The collection doesn't accept tasks (VTODO): set `RADICALE_TASKS_URL` to a task list's full URL, or `off` |
+| `❌ Liste de courses non enregistrée dans Radicale` | `RADICALE_SHOPPING_URL` must be the **full** URL of the shopping calendar (with its ID), different from `RADICALE_URL` |
 | First voice note is slow | Expected: the Whisper model is downloaded once (`[VOIX] Chargement du modèle …` in the logs), then kept in memory |
 | Voice transcription is often wrong | Try `WHISPER_MODEL=medium` (more accurate, slower, ~1.5 GB) |
 

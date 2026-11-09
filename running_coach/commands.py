@@ -72,7 +72,7 @@ def format_goals_reply(goals: list[dict], today: datetime.date) -> str:
             + "\n\n_Pour modifier : « décale mon semi au 14 mars », « vise plutôt 1h50 », « j'abandonne le trail »._")
 
 
-def shopping_prompt(days: int, today: datetime.date, save_to_tasks: bool = False) -> str:
+def shopping_prompt(days: int, today: datetime.date, save_to_calendar: bool = False) -> str:
     end = today + datetime.timedelta(days=days - 1)
     return (
         f"Prépare ma liste de courses pour {days} jour{'s' if days > 1 else ''}, du {_day_label(today)} au {_day_label(end)} inclus.\n"
@@ -86,8 +86,10 @@ def shopping_prompt(days: int, today: datetime.date, save_to_tasks: bool = False
         "- Au plus 3 repères pratiques liés aux séances (ex. collation avant le fractionné de mardi).\n"
         "S'il te manque une information essentielle (nombre de personnes, régime, allergies), fais une hypothèse raisonnable, "
         "dis-la en une ligne et demande-la-moi. Ne modifie pas l'agenda."
-        + (" Une fois la liste finalisée, enregistre-la aussi avec save_shopping_list (mêmes articles et rayons)."
-           if save_to_tasks else "")
+        + (" Une fois la liste finalisée, enregistre-la aussi avec save_shopping_list (mêmes articles et rayons) dans "
+           "l'agenda courses, au créneau de courses ou de commande que je préfère (mémoire) ; à défaut, choisis un "
+           "créneau raisonnable et dis-le."
+           if save_to_calendar else "")
     )
 
 

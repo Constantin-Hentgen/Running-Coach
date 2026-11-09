@@ -245,23 +245,35 @@ def test_weekly_adherence():
     assert "Séances prévues réalisées : 2/3 (67 %)" in text and "non faite : Fractionné (jeu 05/11)" in text
 
 
-def test_shopping_list_tool_saves_items_and_reports(monkeypatch):
+def test_shopping_list_tool_creates_timed_event_and_reports(monkeypatch):
     from running_coach import tools
-    saved = []
+    calls = []
 
-    def fake_replace(items):
-        saved.extend(items)
-        return {"saved": len(items), "removed": 4}
+    def fake_save(items, start, end):
+        calls.append((items, start, end))
+        return {"uid": "u@running-coach-shopping", "summary": "🛒", "start": start, "end": end, "replaced": 1}
 
-    monkeypatch.setattr(tools.cs, "replace_shopping_list", fake_replace)
+    monkeypatch.setattr(tools.cs, "save_shopping_event", fake_save)
     ledger = tools.Ledger()
-    out = tools.tool_save_shopping_list({"items": [
-        {"name": "Bananes", "quantity": "6", "aisle": "🥦 Fruits et légumes"},
-        {"name": "Riz basmati", "quantity": "1 kg"},
+    out = tools.tool_save_shopping_list({"start_time": "2026-11-09T15:00:00", "items": [
+        {"name": "Bananes", "quantity": "7", "aisle": "🥦 Fruits et légumes"},
+        {"name": "Riz", "quantity": "500 g"},
         {"name": "  "},   # ignoré
     ]}, ledger)
-    assert out == {"ok": True, "saved": 2, "removed": 4}
-    assert saved == [("Bananes (6)", "🥦 Fruits et légumes"), ("Riz basmati (1 kg)", None)]
-    assert "🛒 Liste de courses enregistrée dans Radicale : 2 article(s)" in tools.build_report(ledger, False)
-    prompt = commands.shopping_prompt(7, datetime.date(2026, 11, 9), save_to_tasks=True)
+    (items, start, end), = calls
+    assert items == [("Bananes", "7", "🥦 Fruits et légumes"), ("Riz", "500 g", None)]
+    local = start.astimezone(tools.cs.TZ)
+    assert (local.hour, local.minute, (end - start).seconds) == (15, 0, 1800)   # 30 min par défaut
+    assert out["ok"] and out["items"] == 2 and out["previous_list_replaced"] == 1
+    report = tools.build_report(ledger, False)
+    assert "🛒 Liste de courses enregistrée dans l'agenda courses : lun 09/11 15:00–15:30, 2 article(s)" in report
+    prompt = commands.shopping_prompt(7, datetime.date(2026, 11, 9), save_to_calendar=True)
     assert "save_shopping_list" in prompt and "save_shopping_list" not in commands.shopping_prompt(7, datetime.date(2026, 11, 9))
+
+
+def test_shopping_tool_is_offered_only_with_a_dedicated_calendar():
+    from running_coach import tools
+    names = {t["name"] for t in tools.ALL_TOOLS}
+    assert ("save_shopping_list" in names) == bool(tools.settings.radicale_shopping_url)
+    create = next(t for t in tools.ALL_TOOLS if t["name"] == "create_calendar_event")
+    assert "Jamais pour des courses alimentaires" in create["description"]

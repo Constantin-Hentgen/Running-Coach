@@ -269,7 +269,7 @@ class CoachBot:
         if not update.message or not await self._authorized(update):
             return
         days = commands.parse_days(context.args or [], commands.SHOPPING_DEFAULT_DAYS, commands.SHOPPING_MAX_DAYS)
-        prompt = commands.shopping_prompt(days, datetime.datetime.now(TZ).date(), bool(settings.radicale_tasks_url))
+        prompt = commands.shopping_prompt(days, datetime.datetime.now(TZ).date(), bool(settings.radicale_shopping_url))
         await self._ask_and_reply(update, prompt, allow_writes=False)
 
     async def on_briefing(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

@@ -89,6 +89,17 @@ def _weekly_time(value: str | None) -> tuple[int, int, int] | None:
         raise ValueError(f"WEEKLY_REVIEW_TIME doit être au format « sun 19:00 » ou « off » (reçu : {value!r})") from None
 
 
+def _shopping_url(value: str | None, training_url: str | None) -> str | None:
+    """Agenda courses : désactivé s'il est vide, « off », ou identique à l'agenda d'entraînement (les événements
+    courses s'y mêleraient aux séances)."""
+    value = _optional_model(value)
+    if value and training_url and value.rstrip("/") == training_url.rstrip("/"):
+        logger.error("[CONFIG] RADICALE_SHOPPING_URL est l'agenda d'entraînement : liste de courses non enregistrée "
+                     "dans Radicale. Indique l'URL de ton agenda courses dédié.")
+        return None
+    return value
+
+
 def _optional_model(value: str | None) -> str | None:
     """Valeur, ou None si vide ou « off » (modèle Whisper, URL de la liste de courses…)."""
     return None if not value or value.lower() in ("off", "non", "no", "none", "0") else value
@@ -118,7 +129,7 @@ class Settings:
     radicale_url: str | None
     radicale_user: str | None
     radicale_pass: str | None
-    radicale_tasks_url: str | None
+    radicale_shopping_url: str | None
     # Dreeve
     dreeve_url: str | None
     dreeve_api_key: str | None
@@ -165,9 +176,8 @@ class Settings:
             radicale_url=_str("RADICALE_URL"),
             radicale_user=_str("RADICALE_USER"),
             radicale_pass=_str("RADICALE_PASS"),
-            # Liste de courses : par défaut la même collection que le calendrier (Radicale gère événements et tâches
-            # dans une même collection) ; une autre URL pour une liste séparée ; « off » pour désactiver.
-            radicale_tasks_url=_optional_model(_str("RADICALE_TASKS_URL") or _str("RADICALE_URL")),
+            # Agenda courses dédié (RADICALE_TASKS_URL : ancien nom, encore accepté). Jamais l'agenda d'entraînement.
+            radicale_shopping_url=_shopping_url(_str("RADICALE_SHOPPING_URL") or _str("RADICALE_TASKS_URL"), _str("RADICALE_URL")),
             dreeve_url=dreeve_url,
             dreeve_api_key=_str("DREEVE_API_KEY"),
             dreeve_mcp_key=_str("DREEVE_MCP_KEY"),
@@ -219,7 +229,7 @@ class Settings:
             "TELEGRAM_CHAT_ID (sécurité + briefing + débriefs)": self.telegram_chat_id,
             "Dreeve REST (DREEVE_URL + DREEVE_API_KEY)": self.dreeve_enabled,
             "Dreeve MCP (DREEVE_MCP_KEY)": self.dreeve_mcp_key and self.dreeve_mcp_url,
-            "Liste de courses dans Radicale (RADICALE_TASKS_URL)": self.radicale_tasks_url,
+            "Liste de courses dans l'agenda courses (RADICALE_SHOPPING_URL)": self.radicale_shopping_url,
             f"Messages vocaux (WHISPER_MODEL={self.whisper_model or 'off'})": self.whisper_model,
             f"Météo ({', '.join(n for n, _, _ in self.weather_locations) or 'WEATHER_LOCATIONS'})": self.weather_enabled,
         }

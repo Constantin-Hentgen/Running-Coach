@@ -211,3 +211,57 @@ def test_location_roundtrip():
     assert cs.serialize(comp)["location"] == "Maison"
     _, comp = cs.parse_vevent(cs.build_event("v@x", "Repos", start, end, "desc"))
     assert "location" not in cs.serialize(comp)
+
+
+
+# --- Agenda courses ---------------------------------------------------------------
+
+class FakeObj:
+    def __init__(self, cal, data):
+        self.cal, self.data = cal, data
+
+    def delete(self):
+        self.cal.objs.remove(self)
+
+
+class FakeShoppingCalendar:
+    def __init__(self):
+        self.objs = []
+
+    def add(self, ics):
+        self.objs.append(FakeObj(self, ics))
+
+    def add_event(self, ics):
+        self.add(ics)
+
+    def events(self):
+        return [o for o in self.objs if "BEGIN:VEVENT" in o.data]
+
+    def todos(self, include_completed=False):
+        return [o for o in self.objs if "BEGIN:VTODO" in o.data]
+
+    def get_event_by_uid(self, uid):
+        return next(o for o in self.objs if f"UID:{uid}" in o.data)
+
+
+def test_shopping_event_replaces_only_coachs_upcoming_list(monkeypatch):
+    fake = FakeShoppingCalendar()
+    monkeypatch.setattr(cs, "get_shopping_calendar", lambda: fake)
+    now = cs.now_utc()
+    later, earlier = now + datetime.timedelta(days=1), now - datetime.timedelta(days=3)
+    hour = datetime.timedelta(hours=1)
+    fake.add(cs.build_event("mine@phone", "Marché", later, later + hour, "à moi"))                       # à l'athlète
+    fake.add(cs.build_event("old@running-coach-shopping", "🛒 Courses", earlier, earlier + hour, "x"))  # passé : gardé
+    fake.add(cs.build_event("next@running-coach-shopping", "🛒 Courses", later, later + hour, "x"))     # à venir : remplacé
+    fake.add("BEGIN:VCALENDAR\nVERSION:2.0\nBEGIN:VTODO\nUID:t@running-coach-shopping\nSUMMARY:Bananes\nEND:VTODO\nEND:VCALENDAR\n")
+
+    start = now + datetime.timedelta(hours=3)
+    items = [("Bananes", "7", "🥦 Fruits et légumes"), ("Riz", "500 g", "🍚 Féculents"), ("Pommes", None, "🥦 Fruits et légumes")]
+    r = cs.save_shopping_event(items, start, start + datetime.timedelta(minutes=30))
+    assert r["replaced"] == 2 and r["summary"] == "🛒 Courses (3 articles)"
+    uids = {next(line for line in o.data.splitlines() if line.startswith("UID:")) for o in fake.objs}
+    assert uids == {"UID:mine@phone", "UID:old@running-coach-shopping", f"UID:{r['uid']}"}
+    _, comp = cs.parse_vevent(fake.get_event_by_uid(r["uid"]).data)
+    assert str(comp["DESCRIPTION"]) == "🥦 Fruits et légumes\n☐ Bananes — 7\n☐ Pommes\n\n🍚 Féculents\n☐ Riz — 500 g"
+    with pytest.raises(ValueError):
+        cs.save_shopping_event(items, earlier, earlier + hour)   # passé refusé

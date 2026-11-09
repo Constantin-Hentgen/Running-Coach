@@ -1,4 +1,5 @@
 """Outils exposés au modèle + registre (ledger) des actions réellement effectuées."""
+import datetime
 import logging
 from dataclasses import dataclass, field
 
@@ -137,15 +138,18 @@ def tool_save_shopping_list(args: dict, ledger: Ledger) -> dict:
         name = " ".join(str(it.get("name") or "").split())
         if not name:
             continue
-        qty = " ".join(str(it.get("quantity") or "").split())
-        items.append((f"{name} ({qty})" if qty else name, (it.get("aisle") or "").strip() or None))
+        qty = " ".join(str(it.get("quantity") or "").split()) or None
+        items.append((name, qty, (it.get("aisle") or "").strip() or None))
     try:
-        r = cs.replace_shopping_list(items)
+        start = cs.parse_dt(args["start_time"])
+        end = start + datetime.timedelta(minutes=int(args.get("duration_minutes") or 30))
+        r = cs.save_shopping_event(items, start, end)
     except Exception as e:
         ledger.record("shopping", f"{len(items)} article(s)", False, str(e))
         raise
-    ledger.record("shopping", f"{r['saved']} article(s)", True)
-    return {"ok": True, **r}
+    ledger.record("shopping", f"{cs.fmt_when(r['start'], r['end'])}, {len(items)} article(s)", True)
+    return {"ok": True, "uid": r["uid"], "start": r["start"].astimezone(cs.TZ).isoformat(timespec="minutes"),
+            "items": len(items), "previous_list_replaced": r["replaced"]}
 
 
 # ---------------------------------------------------------------------------
@@ -296,26 +300,23 @@ PROPOSE_TOOL = {
     },
 }
 
-def _same_collection(a: str | None, b: str | None) -> bool:
-    return bool(a and b) and a.rstrip("/") == b.rstrip("/")
-
-
-_SHOPPING_WHERE = ("dans le calendrier Radicale de l'athlète (comme tâches, elles n'apparaissent pas comme séances)"
-                   if _same_collection(settings.radicale_tasks_url, settings.radicale_url)
-                   else "dans la liste de courses Radicale dédiée de l'athlète, séparée de l'agenda d'entraînement")
-
 SHOPPING_TOOLS = [
     {
         "name": "save_shopping_list",
         "description": (
-            f"Enregistre la liste de courses comme tâches à cocher {_SHOPPING_WHERE} (remplace la précédente liste du coach ; "
-            "les tâches de l'athlète ne sont jamais touchées). C'est le SEUL moyen d'enregistrer une liste de courses : "
-            "à appeler quand l'athlète demande une liste de courses ou de l'enregistrer / l'ajouter quelque part, "
-            "une fois la liste finalisée."
+            "Enregistre la liste de courses comme UN ÉVÉNEMENT dans l'agenda COURSES dédié de l'athlète (séparé de l'agenda "
+            "d'entraînement), au créneau voulu, avec la checklist par rayon dans sa description. Remplace la précédente liste "
+            "à venir du coach ; ce que l'athlète a créé lui-même n'est jamais touché. C'est le SEUL moyen d'enregistrer une "
+            "liste de courses (jamais create_calendar_event) : à appeler quand l'athlète demande une liste de courses, ou de "
+            "l'enregistrer / la mettre dans l'agenda / à une heure donnée, une fois la liste finalisée. Si la liste existe déjà "
+            "dans la conversation, réutilise-la telle quelle. Heure : celle demandée, sinon sa préférence en mémoire, sinon "
+            "un créneau raisonnable que tu annonces."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
+                "start_time": {"type": "string", "description": "ISO datetime, futur, ex: 2026-11-09T15:00:00 (fuseau local)"},
+                "duration_minutes": {"type": "integer", "description": "durée de l'événement, 30 par défaut"},
                 "items": {
                     "type": "array",
                     "items": {
@@ -329,10 +330,10 @@ SHOPPING_TOOLS = [
                     },
                 },
             },
-            "required": ["items"],
+            "required": ["items", "start_time"],
         },
     },
-] if settings.radicale_tasks_url else []
+] if settings.radicale_shopping_url else []
 
 _COMMON = [*MEMORY_TOOLS, *GOAL_TOOLS, PROPOSE_TOOL, *SHOPPING_TOOLS]
 ALL_TOOLS = [LIST_TOOL, *WRITE_TOOLS, *_COMMON]
@@ -387,7 +388,7 @@ def build_report(ledger: Ledger, truncated: bool, error: str | None = None) -> s
         lines += [f"{_MEMORY_ICONS[a.kind]} : {md_escape(a.label)}" for a in memory]
     for a in ledger.actions:
         if a.kind == "shopping":
-            lines.append(f"🛒 Liste de courses enregistrée dans Radicale : {md_escape(a.label)}" if a.ok
+            lines.append(f"🛒 Liste de courses enregistrée dans l'agenda courses : {md_escape(a.label)}" if a.ok
                          else f"❌ Liste de courses non enregistrée dans Radicale : {md_escape(a.detail)}")
     if truncated:
         lines.append("⚠️ Traitement interrompu (limite atteinte) : l'opération est peut-être incomplète, vérifie l'agenda.")

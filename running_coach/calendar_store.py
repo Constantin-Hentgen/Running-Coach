@@ -13,7 +13,7 @@ import uuid
 
 import caldav
 from caldav.lib.error import NotFoundError
-from icalendar import Calendar, Event, Todo
+from icalendar import Calendar, Event
 
 from .config import FR_DAYS, TZ, UTC, settings
 
@@ -261,62 +261,67 @@ def delete_event(uid: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Liste de courses : tâches (VTODO) dans une liste dédiée (RADICALE_TASKS_URL)
+# Liste de courses : UN événement, à l'heure voulue, dans l'agenda courses dédié (RADICALE_SHOPPING_URL),
+# avec la checklist par rayon dans la description (visible dans n'importe quelle app de calendrier).
 # ---------------------------------------------------------------------------
 
 SHOPPING_UID_SUFFIX = "@running-coach-shopping"
 
 
 @functools.cache
-def get_tasks_list():
-    client = caldav.DAVClient(url=settings.radicale_tasks_url, username=settings.radicale_user,
+def get_shopping_calendar():
+    client = caldav.DAVClient(url=settings.radicale_shopping_url, username=settings.radicale_user,
                               password=settings.radicale_pass)
-    return client.calendar(url=settings.radicale_tasks_url)
+    return client.calendar(url=settings.radicale_shopping_url)
 
 
-def build_todo(uid: str, summary: str, category: str | None = None) -> str:
-    cal = Calendar()
-    cal.add("prodid", "-//running-coach-agent//FR")
-    cal.add("version", "2.0")
-    todo = Todo()
-    todo.add("uid", uid)
-    todo.add("dtstamp", now_utc())
-    todo.add("summary", summary)
-    todo.add("status", "NEEDS-ACTION")
-    if category:
-        todo.add("categories", [category])
-    cal.add_component(todo)
-    return cal.to_ical().decode("utf-8")
+def format_checklist(items: list[tuple[str, str | None, str | None]]) -> str:
+    """[(article, quantité, rayon)] → checklist groupée par rayon, dans l'ordre d'apparition des rayons."""
+    groups: dict[str, list[str]] = {}
+    for name, qty, aisle in items:
+        groups.setdefault(aisle or "🛒 Divers", []).append(f"☐ {name}" + (f" — {qty}" if qty else ""))
+    return "\n\n".join(f"{aisle}\n" + "\n".join(lines) for aisle, lines in groups.items())
 
 
-def _coach_todos() -> list:
+def _coach_shopping_items(now: datetime.datetime) -> list:
+    """Ce que le coach a déjà créé et qu'une nouvelle liste remplace : ses événements courses à venir
+    (les passés restent, c'est l'historique) et les anciennes tâches (ancienne version de la liste)."""
     found = []
-    for obj in get_tasks_list().todos(include_completed=True):
+    shopping = get_shopping_calendar()
+    for obj in [*shopping.events(), *shopping.todos(include_completed=True)]:
         try:
-            uid = next(str(c.get("UID", "")) for c in Calendar.from_ical(obj.data).walk("VTODO"))
+            comp = next(c for c in Calendar.from_ical(obj.data).walk() if c.name in ("VEVENT", "VTODO"))
         except Exception:
             continue
-        if uid.endswith(SHOPPING_UID_SUFFIX):
+        if not str(comp.get("UID", "")).endswith(SHOPPING_UID_SUFFIX):
+            continue
+        if comp.name == "VTODO" or event_bounds(comp)[1] > now:
             found.append(obj)
     return found
 
 
-def replace_shopping_list(items: list[tuple[str, str | None]]) -> dict:
-    """Remplace la liste précédente du coach par `items` [(libellé, rayon)] ; relu sur le serveur.
-
-    Seules les tâches créées par le coach (UID …@running-coach-shopping) sont supprimées :
-    ce que tu as ajouté toi-même à la liste n'est jamais touché.
-    """
+def save_shopping_event(items: list[tuple[str, str | None, str | None]], start: datetime.datetime,
+                        end: datetime.datetime) -> dict:
+    """Crée l'événement courses (relu sur le serveur) et retire la précédente liste à venir du coach.
+    Les événements et tâches que tu crées toi-même dans cet agenda ne sont jamais touchés."""
     if not items:
         raise ValueError("liste vide")
-    removed = 0
-    for obj in _coach_todos():
+    if end <= start:
+        raise ValueError("l'heure de fin doit être après l'heure de début")
+    now = now_utc()
+    if end < now:
+        raise ValueError("créneau dans le passé : refusé")
+    previous = _coach_shopping_items(now)
+    uid = f"{uuid.uuid4()}{SHOPPING_UID_SUFFIX}"
+    summary = f"🛒 Courses ({len(items)} articles)"
+    get_shopping_calendar().add_event(build_event(uid, summary, start, end, format_checklist(items)))
+    try:   # relecture : l'événement doit exister avec le bon créneau avant de supprimer l'ancienne liste
+        _, comp = parse_vevent(get_shopping_calendar().get_event_by_uid(uid).data)
+    except Exception as e:
+        raise RuntimeError(f"relecture impossible après création : {e}") from None
+    c_start, c_end = event_bounds(comp)
+    if not (_close(c_start, start) and _close(c_end, end)):
+        raise RuntimeError("relecture : le créneau enregistré ne correspond pas")
+    for obj in previous:
         obj.delete()
-        removed += 1
-    tasks = get_tasks_list()
-    for label, aisle in items:
-        tasks.add_todo(build_todo(f"{uuid.uuid4()}{SHOPPING_UID_SUFFIX}", label, aisle))
-    saved = len(_coach_todos())
-    if saved != len(items):
-        raise RuntimeError(f"relecture : {saved} article(s) sur le serveur au lieu de {len(items)}")
-    return {"saved": saved, "removed": removed}
+    return {"uid": uid, "summary": summary, "start": c_start, "end": c_end, "replaced": len(previous)}
