@@ -61,12 +61,24 @@ DONNÉES DREEVE (lecture seule) :
 NUTRITION :
 - Tu conseilles aussi l'alimentation, au service des objectifs sportifs ET de santé de la mémoire, en tenant compte des séances prévues (jours durs ou longs : plus de glucides et de récupération ; repos : plus léger).
 - Respecte strictement les préférences, régimes et allergies mémorisés. Pas d'avis médical : pour une pathologie, renvoie vers un professionnel.
+- Une liste de courses (alimentaires) ne va JAMAIS dans l'agenda d'entraînement : pas de `create_calendar_event` pour des courses, un repas ou une commande. Pour l'enregistrer, utilise uniquement `save_shopping_list` (si l'outil est disponible ; sinon, la liste reste dans le message).
 
 FORMAT TELEGRAM : listes à puces (`-`), gras (`*texte*`), émojis sobres. ZÉRO TABLEAU (pas de `|`).
 """.strip()
 
-# Le modèle prétend avoir modifié l'agenda alors qu'aucun outil d'agenda n'a tourné ?
-CLAIM_PATTERN = re.compile(r"supprim|cré[ée]|planifi|modifi|mis à jour|déplac|ajout|réorganis|remplac", re.I)
+# Le modèle prétend avoir modifié l'agenda alors qu'aucun outil d'agenda n'a tourné ? On cherche une
+# affirmation (participe passé) dans une phrase qui n'est ni négative (« je n'ai rien modifié »)
+# ni une question (« le déplacer ? »). Les infinitifs (« déplacer », « ajouter ») ne comptent pas.
+CLAIM_PATTERN = re.compile(r"\b(?:supprimé|créé|planifié|modifié|mis à jour|déplacé|ajouté|réorganisé|remplacé)(?:e?s?)\b", re.I)
+NEGATION = re.compile(r"\b(?:n['’]|ne|pas|rien|aucun|aucune|jamais)\b|\bn['’]", re.I)
+
+
+def claims_calendar_change(text: str) -> bool:
+    for sentence in re.split(r"(?<=[.!?])\s+|\n+", text):
+        sentence = sentence.strip()
+        if sentence and not sentence.endswith("?") and CLAIM_PATTERN.search(sentence) and not NEGATION.search(sentence):
+            return True
+    return False
 
 _client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
 _lock = asyncio.Lock()   # une seule exécution à la fois : pas d'écritures concurrentes
@@ -205,7 +217,7 @@ async def ask(user_prompt: str, chat_id: str = "default", allow_writes: bool = T
 
         calendar_actions = [a for a in ledger.actions if a.kind in ("create", "update", "delete")]
         proposals = [(int(a.detail), a.label) for a in ledger.actions if a.kind == "proposal"]
-        if not calendar_actions and not proposals and CLAIM_PATTERN.search(reply):
+        if not calendar_actions and not proposals and claims_calendar_change(reply):
             reply += "\n\n⚠️ Aucune modification de l'agenda n'a réellement été effectuée dans Radicale."
         elif not reply and not ledger.actions and not error:
             reply = "Je n'ai rien produit de concret sur cette demande (aucune réponse du modèle, aucune action)."

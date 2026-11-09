@@ -178,7 +178,7 @@ LIST_TOOL = {
 WRITE_TOOLS = [
     {
         "name": "create_calendar_event",
-        "description": "Crée un événement (séance ou repos) dans Radicale, futur uniquement. Heures sans fuseau = fuseau local de l'athlète. La description doit être multi-lignes avec émojis.",
+        "description": "Crée un événement d'ENTRAÎNEMENT (séance, repos, course à pied) dans l'agenda d'entraînement Radicale, futur uniquement. Jamais pour des courses alimentaires ou un repas. Heures sans fuseau = fuseau local de l'athlète. La description doit être multi-lignes avec émojis.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -296,12 +296,22 @@ PROPOSE_TOOL = {
     },
 }
 
+def _same_collection(a: str | None, b: str | None) -> bool:
+    return bool(a and b) and a.rstrip("/") == b.rstrip("/")
+
+
+_SHOPPING_WHERE = ("dans le calendrier Radicale de l'athlète (comme tâches, elles n'apparaissent pas comme séances)"
+                   if _same_collection(settings.radicale_tasks_url, settings.radicale_url)
+                   else "dans la liste de courses Radicale dédiée de l'athlète, séparée de l'agenda d'entraînement")
+
 SHOPPING_TOOLS = [
     {
         "name": "save_shopping_list",
         "description": (
-            "Enregistre la liste de courses comme tâches à cocher dans la liste Radicale de l'athlète (remplace la précédente "
-            "liste du coach). À appeler UNIQUEMENT quand l'athlète demande une liste de courses, une fois la liste finalisée."
+            f"Enregistre la liste de courses comme tâches à cocher {_SHOPPING_WHERE} (remplace la précédente liste du coach ; "
+            "les tâches de l'athlète ne sont jamais touchées). C'est le SEUL moyen d'enregistrer une liste de courses : "
+            "à appeler quand l'athlète demande une liste de courses ou de l'enregistrer / l'ajouter quelque part, "
+            "une fois la liste finalisée."
         ),
         "input_schema": {
             "type": "object",

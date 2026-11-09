@@ -126,3 +126,11 @@ def test_planning_model_and_proposal_without_false_claim_warning(tmp_path, monke
     assert "Aucune modification" not in reply.text   # « déplacer » proposé, pas prétendu fait
     names = {t["name"] for t in fake.calls[0]["tools"]}
     assert {"propose_change", "set_goal", "remove_goal"} <= names and "create_calendar_event" not in names
+
+
+def test_claim_detection_ignores_negations_questions_and_infinitives():
+    assert agent.claims_calendar_change("J'ai déplacé ta sortie longue à dimanche.")
+    assert agent.claims_calendar_change("Séance créée pour mardi 18:30 !")
+    assert not agent.claims_calendar_change("L'événement existe déjà. Je n'ai rien modifié.")
+    assert not agent.claims_calendar_change("Tu veux que je la déplace ?\n- Le déplacer ou changer sa durée ;")
+    assert not agent.claims_calendar_change("Aucune séance n'a été supprimée.")
