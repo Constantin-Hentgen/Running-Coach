@@ -149,6 +149,22 @@ def tool_save_shopping_list(args: dict, ledger: Ledger) -> dict:
         except (TypeError, ValueError):
             return None
 
+    # Agenda courses : créneau demandé, sinon celui de la liste en cours (liste modifiée → même événement mis à jour).
+    slot = None
+    if settings.radicale_shopping_url:
+        previous = store.shopping_list
+        if args.get("start_time"):
+            start = cs.parse_dt(args["start_time"])
+            slot = (start, start + datetime.timedelta(minutes=int(args.get("duration_minutes") or 30)))
+        elif previous and previous.get("event_start") and previous.get("event_end"):
+            slot = (datetime.datetime.fromisoformat(previous["event_start"]),
+                    datetime.datetime.fromisoformat(previous["event_end"]))
+            if slot[1] <= cs.now_utc():
+                slot = None
+        if slot is None:
+            raise ValueError("start_time requis : à quelle heure l'athlète fait-il ses courses ou sa commande ? "
+                             "(mémoire, sinon propose un créneau et dis-le)")
+
     days = number("days_covered")
     lst = store.set_shopping_list(items, days=int(days) if days else None,
                                   coverage=" ".join(str(args.get("coverage") or "").split())[:200] or None,
@@ -156,15 +172,13 @@ def tool_save_shopping_list(args: dict, ledger: Ledger) -> dict:
     ledger.record("shopping", f"{len(lst['items'])} article(s)", True, detail=str(lst["id"]))
     result = {"ok": True, "items": len(lst["items"]), "checklist": "envoyée sous ta réponse, à cocher dans Telegram"}
 
-    if settings.radicale_shopping_url and args.get("start_time"):
+    if slot is not None:
         try:
-            start = cs.parse_dt(args["start_time"])
-            end = start + datetime.timedelta(minutes=int(args.get("duration_minutes") or 30))
-            r = cs.save_shopping_event(lst, start, end)
+            r = cs.save_shopping_event(lst, *slot)
         except Exception as e:
             ledger.record("shopping_event", "agenda courses", False, str(e))
             return {**result, "calendar": f"échec : {type(e).__name__}: {e}"}
-        store.attach_shopping_event(lst["id"], r["uid"])
+        store.attach_shopping_event(lst["id"], r["uid"], r["start"], r["end"])
         ledger.record("shopping_event", cs.fmt_when(r["start"], r["end"]), True)
         result["calendar"] = {"start": r["start"].astimezone(cs.TZ).isoformat(timespec="minutes"),
                               "previous_list_replaced": r["replaced"]}
@@ -324,6 +338,8 @@ _SHOPPING_CALENDAR = (
     "créneau start_time, avec la checklist par rayon dans sa description, tenue à jour quand l'athlète coche ; cela "
     "remplace la précédente liste à venir du coach, et ce que l'athlète a créé lui-même n'est jamais touché. Heure : "
     "celle demandée, sinon sa préférence en mémoire, sinon un créneau raisonnable que tu annonces."
+    + " Pour MODIFIER la liste en cours (article ajouté, retiré, quantité), rappelle l'outil avec la liste complète "
+    "corrigée : sans start_time, l'événement existant est mis à jour au même créneau."
     if settings.radicale_shopping_url else " (Aucun agenda courses n'est configuré : start_time est ignoré.)"
 )
 

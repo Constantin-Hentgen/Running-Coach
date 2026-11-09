@@ -293,10 +293,14 @@ class Store:
         lst = self.state["shopping"]
         return lst if lst is not None and lst["id"] == int(list_id) else None
 
-    def attach_shopping_event(self, list_id, uid: str) -> None:
+    def attach_shopping_event(self, list_id, uid: str, start: datetime.datetime | None = None,
+                              end: datetime.datetime | None = None) -> None:
+        """Rattache l'événement de l'agenda courses (et son créneau, réutilisé si la liste est modifiée)."""
         with self._lock:
             if (lst := self._current_shopping(list_id)) is not None:
                 lst["event_uid"] = uid
+                lst["event_start"] = start.isoformat() if start else None
+                lst["event_end"] = end.isoformat() if end else None
                 self._save()
 
     def set_recipes(self, list_id, text: str) -> None:

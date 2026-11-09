@@ -280,6 +280,8 @@ class CoachBot:
             typing.cancel()
         if not reply.text.startswith("❌"):
             store.set_recipes(lst["id"], reply.text)
+            if lst.get("event_uid"):   # les recettes rejoignent la checklist dans l'événement courses
+                await self._sync_shopping_event(lst["id"])
         await self._deliver(reply, update=update)
 
     async def on_goals(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

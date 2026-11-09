@@ -422,3 +422,58 @@ def test_recipes_generated_once_then_cached_and_regenerated_on_demand(tmp_path, 
     assert len(asked) == 1 and replies[-1].strip() == "débrief"
     asyncio.run(b.on_recipes(update(), NS(args=["new"])))  # /recipes new : régénérées
     assert len(asked) == 2
+
+
+def test_list_edit_updates_same_calendar_slot_and_time_is_required(tmp_path, monkeypatch):
+    import dataclasses
+
+    import pytest
+
+    from running_coach import tools
+    store = Store(tmp_path / "s.json")
+    monkeypatch.setattr(tools, "store", store)
+    monkeypatch.setattr(tools, "settings", dataclasses.replace(tools.settings, radicale_shopping_url="https://dav/shop/"))
+    slots = []
+
+    def fake_save(lst, start, end):
+        slots.append((start, end, [i["name"] for i in lst["items"]]))
+        return {"uid": f"u{len(slots)}@running-coach-shopping", "summary": "🛒", "start": start, "end": end, "replaced": len(slots) - 1}
+
+    monkeypatch.setattr(tools.cs, "save_shopping_event", fake_save)
+    base = {"days_covered": 7, "estimated_cost_min_eur": 50, "estimated_cost_max_eur": 60}
+
+    with pytest.raises(ValueError, match="start_time requis"):   # agenda configuré, aucun créneau connu
+        tools.tool_save_shopping_list({**base, "items": [{"name": "Riz"}]}, tools.Ledger())
+    assert store.shopping_list is None
+
+    start = (datetime.datetime.now(tools.cs.TZ) + datetime.timedelta(days=1)).replace(hour=15, minute=0, second=0, microsecond=0)
+    tools.tool_save_shopping_list({**base, "items": [{"name": "Riz"}, {"name": "Cabillaud"}],
+                                   "start_time": start.isoformat()}, tools.Ledger())
+    # « enlève le cabillaud » : liste complète corrigée, sans heure → même créneau, événement remplacé
+    out = tools.tool_save_shopping_list({**base, "items": [{"name": "Riz"}]}, tools.Ledger())
+    (s1, e1, first), (s2, e2, second) = slots
+    assert (s2, e2) == (s1, e1) and first == ["Riz", "Cabillaud"] and second == ["Riz"]
+    assert out["calendar"]["previous_list_replaced"] == 1 and store.shopping_list["event_uid"] == "u2@running-coach-shopping"
+
+
+def test_recipes_are_written_into_the_shopping_event(tmp_path, monkeypatch):
+    b, store = _bot(tmp_path, monkeypatch)
+    lst = store.set_shopping_list([{"name": "Poulet", "qty": "800 g", "aisle": "🥩 Protéines"}], days=7)
+    store.attach_shopping_event(lst["id"], "uid-courses")
+    synced = []
+    monkeypatch.setattr(bot_module.cs, "set_shopping_description", lambda uid, text: synced.append(text))
+
+    async def fake_ask(prompt, chat_id, allow_writes=True, planning=False):
+        return agent.AgentReply("🗓️ *Plan de batch cooking* : dimanche, 4 boîtes\n*Poulet riz curry* — 4 boîtes")
+
+    monkeypatch.setattr(bot_module.agent, "ask", fake_ask)
+
+    async def reply_text(text, **kwargs):
+        pass
+
+    update = NS(message=NS(reply_text=reply_text), effective_message=NS(reply_text=reply_text),
+                effective_chat=NS(id=42, send_action=_noop))
+    asyncio.run(b.on_recipes(update, NS(args=[])))
+    (description,) = synced
+    assert "☐ Poulet — 800 g" in description and "Recettes : /recipes" not in description
+    assert description.endswith("🍳 RECETTES\n\n🗓️ Plan de batch cooking : dimanche, 4 boîtes\nPoulet riz curry — 4 boîtes")

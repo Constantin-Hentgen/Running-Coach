@@ -9,6 +9,7 @@
 import datetime
 import functools
 import logging
+import re
 import uuid
 
 import caldav
@@ -306,15 +307,24 @@ def shopping_summary_line(lst: dict) -> str:
     return " · ".join(parts)
 
 
+def plain_text(markdown: str) -> str:
+    """Retire le balisage Telegram (*gras*, _italique_, `code`, échappements) pour une description d'agenda."""
+    return re.sub(r"\\([_*`\[])", r"\1", re.sub(r"(?<!\\)[*_`]", "", markdown)).strip()
+
+
 def shopping_description(lst: dict) -> str:
-    """Description de l'événement courses : couverture, coût estimé, puis la checklist."""
+    """Description de l'événement courses : couverture, coût estimé, checklist, puis les recettes si générées."""
     head = []
     if lst.get("days") or lst.get("coverage"):
         head.append("Couvre : " + ", ".join(x for x in (lst.get("days") and f"{lst['days']} jours", lst.get("coverage")) if x))
     if cost := format_cost(lst):
         head.append(f"Coût estimé : {cost}")
-    head.append("Recettes : /recipes dans Telegram")
-    return "\n".join(head) + "\n\n" + format_checklist(lst["items"])
+    if not lst.get("recipes"):
+        head.append("Recettes : /recipes dans Telegram")
+    text = "\n".join(head) + "\n\n" + format_checklist(lst["items"])
+    if lst.get("recipes"):
+        text += "\n\n🍳 RECETTES\n\n" + plain_text(lst["recipes"])
+    return text
 
 
 def format_checklist(items: list[dict]) -> str:
