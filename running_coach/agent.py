@@ -199,7 +199,7 @@ async def ask(user_prompt: str, chat_id: str = "default", allow_writes: bool = T
     """Point d'entrée unique : renvoie le texte à envoyer sur Telegram (compte-rendu inclus) et les propositions.
 
     allow_writes=False : pas d'outils d'écriture d'agenda (mémoire, objectifs, propositions et lecture restent permis).
-    planning=True : modèle de planification (CLAUDE_PLANNING_MODEL), pour les briefings et bilans.
+    planning=True : modèle de planification (CLAUDE_PLANNING_MODEL), pour le bilan de la semaine uniquement.
     """
     model = settings.planning_model if planning else settings.model
     async with _lock:

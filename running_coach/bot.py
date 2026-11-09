@@ -275,7 +275,7 @@ class CoachBot:
     async def on_briefing(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.message or not await self._authorized(update):
             return
-        await self._ask_and_reply(update, MORNING_PROMPT.replace("le briefing matinal", "un briefing"), planning=True)
+        await self._ask_and_reply(update, MORNING_PROMPT.replace("le briefing matinal", "un briefing"))
 
     async def on_review(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.message or not await self._authorized(update):
@@ -360,7 +360,7 @@ class CoachBot:
 
     async def morning_briefing(self) -> None:
         try:
-            reply = await agent.ask(MORNING_PROMPT, chat_id=self.chat_id, planning=True)
+            reply = await agent.ask(MORNING_PROMPT, chat_id=self.chat_id)
         except Exception as e:
             logger.exception("Briefing matinal en échec")
             reply = agent.AgentReply(f"❌ Briefing matinal impossible : {type(e).__name__}")

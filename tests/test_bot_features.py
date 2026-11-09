@@ -279,8 +279,8 @@ def test_shopping_tool_is_offered_only_with_a_dedicated_calendar():
     assert "Jamais pour des courses alimentaires" in create["description"]
 
 
-def test_only_briefing_and_review_use_the_planning_model(tmp_path, monkeypatch):
-    """Sonnet coûte plus cher : seuls le briefing et le bilan l'utilisent, tout le reste (courses compris) reste sur Haiku."""
+def test_only_the_weekly_review_uses_the_planning_model(tmp_path, monkeypatch):
+    """Sonnet coûte plus cher : seul le bilan de la semaine l'utilise ; tout le reste (briefing, courses…) reste sur Haiku."""
     b, store = _bot(tmp_path, monkeypatch, runs=[_run(1)])
     calls = []
 
@@ -308,5 +308,9 @@ def test_only_briefing_and_review_use_the_planning_model(tmp_path, monkeypatch):
     assert run(b.on_shopping, ["3"]) is False
     assert run(b.on_message) is False          # « mets la liste de courses à 15h »
     assert run(b.on_debrief) is False
-    assert run(b.on_briefing) is True
+    assert run(b.on_briefing) is False
     assert run(b.on_review) is True
+    asyncio.run(b.morning_briefing())
+    assert calls.pop()[1] is False
+    asyncio.run(b.weekly_review())
+    assert calls.pop()[1] is True
