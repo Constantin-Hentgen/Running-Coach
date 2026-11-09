@@ -277,3 +277,36 @@ def test_shopping_tool_is_offered_only_with_a_dedicated_calendar():
     assert ("save_shopping_list" in names) == bool(tools.settings.radicale_shopping_url)
     create = next(t for t in tools.ALL_TOOLS if t["name"] == "create_calendar_event")
     assert "Jamais pour des courses alimentaires" in create["description"]
+
+
+def test_only_briefing_and_review_use_the_planning_model(tmp_path, monkeypatch):
+    """Sonnet coûte plus cher : seuls le briefing et le bilan l'utilisent, tout le reste (courses compris) reste sur Haiku."""
+    b, store = _bot(tmp_path, monkeypatch, runs=[_run(1)])
+    calls = []
+
+    async def fake_ask(prompt, chat_id, allow_writes=True, planning=False):
+        calls.append((prompt[:40], planning))
+        return agent.AgentReply("ok")
+
+    monkeypatch.setattr(bot_module.agent, "ask", fake_ask)
+    monkeypatch.setattr(b, "_review_prompt", lambda: "Fais le bilan de ma semaine.")
+    import dataclasses
+    monkeypatch.setattr(bot_module, "settings", dataclasses.replace(bot_module.settings, dreeve_url="http://d", dreeve_api_key="k"))
+
+    async def reply_text(text, **kwargs):
+        pass
+
+    def update(text="x"):
+        return NS(message=NS(text=text, reply_text=reply_text), effective_message=NS(reply_text=reply_text),
+                  effective_chat=NS(id=42, send_action=_noop))
+
+    def run(handler, args=()):
+        asyncio.run(handler(update(), NS(args=list(args))))
+        return calls.pop()[1]
+
+    assert run(b.on_shopping) is False
+    assert run(b.on_shopping, ["3"]) is False
+    assert run(b.on_message) is False          # « mets la liste de courses à 15h »
+    assert run(b.on_debrief) is False
+    assert run(b.on_briefing) is True
+    assert run(b.on_review) is True
