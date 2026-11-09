@@ -110,3 +110,12 @@ def test_rain_alert_lead_time():
     assert rain_alerts.lead_time(now + datetime.timedelta(hours=31, minutes=20), now) == "dans 31 h"
     assert rain_alerts.lead_time(now + datetime.timedelta(minutes=20), now) == "imminent"
     assert rain_alerts.lead_time(now + datetime.timedelta(days=3), now) == "dans 3 j"
+
+
+def test_shopping_days_and_prompt():
+    assert commands.parse_days([], commands.SHOPPING_DEFAULT_DAYS, commands.SHOPPING_MAX_DAYS) == 7
+    assert commands.parse_days(["30"], commands.SHOPPING_DEFAULT_DAYS, commands.SHOPPING_MAX_DAYS) == 14
+    prompt = commands.shopping_prompt(3, datetime.date(2026, 11, 9))
+    assert "3 jours, du lun 09/11 au mer 11/11 inclus" in prompt
+    assert "objectifs sportifs et de santé" in prompt and "Ne modifie pas l'agenda" in prompt
+    assert "1 jour, du lun 09/11 au lun 09/11" in commands.shopping_prompt(1, datetime.date(2026, 11, 9))

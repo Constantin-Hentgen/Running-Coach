@@ -10,6 +10,8 @@ from .formatting import md_escape
 
 AGENDA_DEFAULT_DAYS = 7
 AGENDA_MAX_DAYS = 45
+SHOPPING_DEFAULT_DAYS = 7
+SHOPPING_MAX_DAYS = 14   # au-delà, les produits frais ne tiennent pas
 
 # (commande principale, alias, description du menu « / » de Telegram)
 COMMANDS = [
@@ -19,6 +21,7 @@ COMMANDS = [
     ("weather", [], "Prévisions par lieu d'entraînement"),
     ("memory", [], "Ce que le coach sait de toi"),
     ("debrief", [], "Débrief IA de ton dernier run"),
+    ("shopping", [], "Liste de courses selon tes objectifs (7 j, ou /shopping 3)"),
     ("briefing", [], "Briefing IA complet et ajustement du programme"),
     ("help", ["start"], "Liste des commandes"),
 ]
@@ -37,6 +40,7 @@ HELP_TEXT = """🏃 *Ton coach running*
 
 *Avec le coach* (IA)
 /debrief — débrief de ton dernier run
+/shopping — liste de courses pour 7 jours selon tes objectifs sportifs et santé (/shopping 3 pour 3 jours)
 /briefing — briefing complet, ajuste le programme dans l'agenda
 
 /help — cette aide
@@ -44,13 +48,30 @@ HELP_TEXT = """🏃 *Ton coach running*
 _Automatique : débrief après chaque run, briefing chaque matin, alerte si pluie sur une séance._"""
 
 
-def parse_days(args: list[str]) -> int:
-    """Nombre de jours demandé à /plan, borné ; valeur par défaut si absent ou invalide."""
+def parse_days(args: list[str], default: int = AGENDA_DEFAULT_DAYS, maximum: int = AGENDA_MAX_DAYS) -> int:
+    """Nombre de jours passé à une commande, borné ; valeur par défaut si absent ou invalide."""
     try:
-        days = int(args[0]) if args else AGENDA_DEFAULT_DAYS
+        days = int(args[0]) if args else default
     except ValueError:
-        return AGENDA_DEFAULT_DAYS
-    return max(1, min(days, AGENDA_MAX_DAYS))
+        return default
+    return max(1, min(days, maximum))
+
+
+def shopping_prompt(days: int, today: datetime.date) -> str:
+    end = today + datetime.timedelta(days=days - 1)
+    return (
+        f"Prépare ma liste de courses pour {days} jour{'s' if days > 1 else ''}, du {_day_label(today)} au {_day_label(end)} inclus.\n"
+        "Base-toi sur : mes objectifs sportifs et de santé, mes préférences, régimes, allergies et contraintes alimentaires "
+        "(mémoire) ; les séances prévues dans l'agenda sur cette période (jours durs ou longs : plus de glucides et de "
+        "récupération ; jours de repos : plus léger) ; ma charge d'entraînement actuelle.\n"
+        "Format Telegram, concis :\n"
+        "- 1 ou 2 lignes sur la logique de la période (séances clés, jours de repos).\n"
+        "- La liste groupée par rayon avec un émoji (fruits et légumes, protéines, féculents, produits frais, épicerie, "
+        "surgelés…), avec des quantités totales réalistes pour la période.\n"
+        "- Au plus 3 repères pratiques liés aux séances (ex. collation avant le fractionné de mardi).\n"
+        "S'il te manque une information essentielle (nombre de personnes, régime, allergies), fais une hypothèse raisonnable, "
+        "dis-la en une ligne et demande-la-moi. Ne modifie pas l'agenda."
+    )
 
 
 def _day_label(d: datetime.date) -> str:

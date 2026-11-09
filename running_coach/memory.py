@@ -15,7 +15,7 @@ from .config import TZ, settings
 
 logger = logging.getLogger(__name__)
 
-CATEGORIES = ["preference", "habitude", "contrainte", "objectif", "santé", "équipement", "autre"]
+CATEGORIES = ["preference", "habitude", "contrainte", "objectif", "santé", "nutrition", "équipement", "autre"]
 MAX_ITEMS = 80
 MAX_TEXT = 300
 

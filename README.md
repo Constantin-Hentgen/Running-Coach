@@ -23,7 +23,8 @@ Coach▸ Dimanche est sec (12°C, vent faible) : sortie longue déplacée à 9h0
 - **Planning in your calendar**: creates, moves, edits and deletes sessions in a dedicated CalDAV calendar.
 - **Morning briefing** (configurable time): reviews training load, weather and calendar, and adjusts the upcoming days.
 - **Automatic debrief** right after every run imported into Dreeve (Dreeve is checked every minute): the run vs the plan, vs your past performances, whether the coming sessions still fit, and where you stand on your goals.
-- **Persistent memory**: the coach remembers your preferences, habits, constraints, goals, injuries and gear, and applies them every time it plans.
+- **Persistent memory**: the coach remembers your preferences, habits, constraints, goals, injuries, food preferences and gear, and applies them every time it plans.
+- **Nutrition**: `/shopping` gives a shopping list for the coming days, matched to your sport and health goals and to the sessions in your calendar.
 - **Rain alerts**: a Telegram message when rain is forecast during an upcoming session, with your other training place's forecast for comparison.
 - **Weather per training place** (e.g. home and work): each session is planned with the forecast for where you'll actually run that day.
 - **Real data**: training load (CTL/ATL/TSB, acute:chronic ratio), weekly volume, recent runs, plus on-demand detail through Dreeve's MCP server.
@@ -154,7 +155,7 @@ To update: *Pull and redeploy* (no need to re-pull images, the image is built fr
 | `PLANNING_HORIZON_DAYS` | `30` | Days (re)planned by the briefing |
 | `CALENDAR_CONTEXT_DAYS` | `45` | Days of calendar given to the coach |
 | `HISTORY_MESSAGES` | `6` | Chat messages kept as history |
-| `COACH_SEED_MEMORY` | — | Starting knowledge, format `category: text \| category: text` (categories: `preference`, `habitude`, `contrainte`, `objectif`, `santé`, `équipement`, `autre`). Read **once**, when the memory is first created. Single line |
+| `COACH_SEED_MEMORY` | — | Starting knowledge, format `category: text \| category: text` (categories: `preference`, `habitude`, `contrainte`, `objectif`, `santé`, `nutrition`, `équipement`, `autre`). Read **once**, when the memory is first created. Single line |
 
 ### Technical
 
@@ -185,6 +186,7 @@ Just talk to it (in French), for example:
 | `/weather` | Forecast for each training place |
 | `/memory` | Shows everything the coach knows about you, with each memory's number |
 | `/debrief` | AI debrief of your latest run (same 4 parts as the automatic one, read-only) |
+| `/shopping` | AI shopping list for the next 7 days (`/shopping 3` for 3, max 14), built from your sport and health goals, food preferences in memory, and the sessions planned over that period |
 | `/briefing` | Runs the full briefing now: reviews everything and adjusts the plan in your calendar |
 | `/help` (or `/start`) | Lists the commands |
 

@@ -158,6 +158,13 @@ class CoachBot:
         prompt = DEBRIEF_PROMPT.format(intro="Débriefe ma dernière séance", runs=dreeve.format_activity(runs[0]))
         await self._ask_and_reply(update, prompt, allow_writes=False)
 
+    async def on_shopping(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if not update.message or not await self._authorized(update):
+            return
+        days = commands.parse_days(context.args or [], commands.SHOPPING_DEFAULT_DAYS, commands.SHOPPING_MAX_DAYS)
+        prompt = commands.shopping_prompt(days, datetime.datetime.now(TZ).date())
+        await self._ask_and_reply(update, prompt, allow_writes=False)
+
     async def on_briefing(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.message or not await self._authorized(update):
             return
@@ -243,7 +250,7 @@ def build_bot() -> CoachBot:
     handlers = {
         "plan": bot.on_agenda, "load": bot.on_form, "runs": bot.on_last_runs,
         "weather": bot.on_weather, "memory": bot.on_memory, "debrief": bot.on_debrief,
-        "briefing": bot.on_briefing, "help": bot.on_help,
+        "shopping": bot.on_shopping, "briefing": bot.on_briefing, "help": bot.on_help,
     }
     for name, aliases, _ in commands.COMMANDS:
         app.add_handler(CommandHandler([name, *aliases], handlers[name]))

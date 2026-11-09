@@ -183,7 +183,7 @@ MEMORY_TOOLS = [
         "description": (
             "Mémorise durablement un fait sur l'athlète, réutilisé dans toutes les conversations et planifications futures : "
             "préférence (horaires, types de séance), habitude, contrainte (agenda, travail, famille), objectif (course, chrono), "
-            "santé (blessure, douleur, sommeil), équipement. Une phrase courte, factuelle, autonome, datée si utile. "
+            "santé (blessure, douleur, sommeil, poids), nutrition (régime, allergies, aliments aimés ou évités, foyer, budget), équipement. Une phrase courte, factuelle, autonome, datée si utile. "
             "N'enregistre PAS l'éphémère (une séance ponctuelle, la météo du jour). "
             "Si cela contredit ou précise un souvenir existant, passe son id dans replaces_id pour le remplacer."
         ),
