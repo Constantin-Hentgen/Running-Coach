@@ -92,7 +92,13 @@ def shopping_text(lst: dict) -> str:
     done = sum(i["done"] for i in lst["items"])
     total = len(lst["items"])
     status = "tout est dans le panier 🎉" if done == total else f"{done}/{total} ✅"
-    return f"🛒 *Liste de courses* — {status}\n_Touche un article quand il est dans le panier._"
+    lines = [f"🛒 *Liste de courses* — {status}"]
+    if summary := cs.shopping_summary_line(lst):
+        lines.append(f"📆 {md_escape(summary)}")
+    if lst.get("coverage"):
+        lines.append(f"🍽️ {md_escape(lst['coverage'])}")
+    lines.append("_Touche un article quand il est dans le panier. Recettes : /recipes_")
+    return "\n".join(lines)
 
 
 def shopping_markup(lst: dict) -> InlineKeyboardMarkup:
@@ -252,6 +258,30 @@ class CoachBot:
             return
         await send_text(update.message.reply_text, shopping_text(lst), shopping_markup(lst))
 
+    async def on_recipes(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """/recipes : recettes de la liste en cours (générées une fois, puis réaffichées sans IA) ; /recipes new : d'autres."""
+        if not update.message or not await self._authorized(update):
+            return
+        lst = store.shopping_list
+        if lst is None:
+            await update.message.reply_text("🍳 Pas de liste de courses en cours : lance d'abord /shopping.")
+            return
+        regenerate = bool(context.args) and context.args[0].lower() in ("new", "nouvelles", "autres")
+        if lst.get("recipes") and not regenerate:
+            await send_text(update.message.reply_text, lst["recipes"])
+            return
+        typing = asyncio.create_task(self._keep_typing(update))
+        try:
+            reply = await agent.ask(commands.recipes_prompt(lst), chat_id=str(update.effective_chat.id), allow_writes=False)
+        except Exception as e:
+            logger.exception("Recettes en échec")
+            reply = agent.AgentReply(f"❌ Recettes impossibles : {type(e).__name__}")
+        finally:
+            typing.cancel()
+        if not reply.text.startswith("❌"):
+            store.set_recipes(lst["id"], reply.text)
+        await self._deliver(reply, update=update)
+
     async def on_goals(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await self._command(update, lambda: commands.format_goals_reply(store.goals, datetime.datetime.now(TZ).date()))
 
@@ -389,7 +419,7 @@ class CoachBot:
             if lst is None or lst["id"] != list_id or not lst.get("event_uid"):
                 return
             try:
-                await asyncio.to_thread(cs.set_shopping_description, lst["event_uid"], cs.format_checklist(lst["items"]))
+                await asyncio.to_thread(cs.set_shopping_description, lst["event_uid"], cs.shopping_description(lst))
             except Exception as e:
                 logger.error(f"Checklist non recopiée dans l'agenda courses : {e}")
 
@@ -520,7 +550,7 @@ def build_bot() -> CoachBot:
     bot = CoachBot(app)
     handlers = {
         "plan": bot.on_agenda, "load": bot.on_form, "runs": bot.on_last_runs, "weather": bot.on_weather,
-        "goals": bot.on_goals, "memory": bot.on_memory, "list": bot.on_list, "debrief": bot.on_debrief, "review": bot.on_review,
+        "goals": bot.on_goals, "memory": bot.on_memory, "list": bot.on_list, "recipes": bot.on_recipes, "debrief": bot.on_debrief, "review": bot.on_review,
         "shopping": bot.on_shopping, "briefing": bot.on_briefing, "help": bot.on_help,
     }
     for name, aliases, _ in commands.COMMANDS:

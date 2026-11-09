@@ -258,11 +258,19 @@ def test_shopping_event_replaces_only_coachs_upcoming_list(monkeypatch):
     start = now + datetime.timedelta(hours=3)
     items = [{"name": "Bananes", "qty": "7", "aisle": "🥦 Fruits et légumes"}, {"name": "Riz", "qty": "500 g", "aisle": "🍚 Féculents"},
              {"name": "Pommes", "aisle": "🥦 Fruits et légumes", "done": True}]
-    r = cs.save_shopping_event(items, start, start + datetime.timedelta(minutes=30))
-    assert r["replaced"] == 2 and r["summary"] == "🛒 Courses (3 articles)"
+    lst = {"items": items, "days": 7, "coverage": "déjeuners et dîners", "cost_min": 54.6, "cost_max": 70}
+    r = cs.save_shopping_event(lst, start, start + datetime.timedelta(minutes=30))
+    assert r["replaced"] == 2 and r["summary"] == "🛒 Courses (3 articles, 7 jours · 55–70 € estimés)"
     uids = {next(line for line in o.data.splitlines() if line.startswith("UID:")) for o in fake.objs}
     assert uids == {"UID:mine@phone", "UID:old@running-coach-shopping", f"UID:{r['uid']}"}
     _, comp = cs.parse_vevent(fake.get_event_by_uid(r["uid"]).data)
-    assert str(comp["DESCRIPTION"]) == "🥦 Fruits et légumes\n☐ Bananes — 7\n✅ Pommes\n\n🍚 Féculents\n☐ Riz — 500 g"
+    assert str(comp["DESCRIPTION"]) == ("Couvre : 7 jours, déjeuners et dîners\nCoût estimé : 55–70 €\nRecettes : /recipes dans Telegram"
+                                        "\n\n🥦 Fruits et légumes\n☐ Bananes — 7\n✅ Pommes\n\n🍚 Féculents\n☐ Riz — 500 g")
     with pytest.raises(ValueError):
-        cs.save_shopping_event(items, earlier, earlier + hour)   # passé refusé
+        cs.save_shopping_event(lst, earlier, earlier + hour)   # passé refusé
+
+
+def test_shopping_summary_and_cost_formats():
+    assert cs.shopping_summary_line({"days": 7, "cost_min": 55, "cost_max": 70}) == "7 jours · 55–70 € estimés"
+    assert cs.shopping_summary_line({"days": 1, "cost_min": 12.4, "cost_max": None}) == "1 jour · ~12 € estimés"
+    assert cs.shopping_summary_line({"days": None, "cost_min": None, "cost_max": None}) == ""

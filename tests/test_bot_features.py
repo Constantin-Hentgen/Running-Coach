@@ -260,8 +260,8 @@ def test_shopping_tool_checklist_and_calendar_event(tmp_path, monkeypatch):
     monkeypatch.setattr(tools, "store", store)
     calls = []
 
-    def fake_save(items, start, end):
-        calls.append((items, start, end))
+    def fake_save(lst, start, end):
+        calls.append((lst["items"], start, end))
         return {"uid": "u@running-coach-shopping", "summary": "🛒", "start": start, "end": end, "replaced": 1}
 
     monkeypatch.setattr(tools.cs, "save_shopping_event", fake_save)
@@ -269,8 +269,13 @@ def test_shopping_tool_checklist_and_calendar_event(tmp_path, monkeypatch):
     # Sans agenda courses : checklist seule, start_time ignoré
     monkeypatch.setattr(tools, "settings", dataclasses.replace(tools.settings, radicale_shopping_url=None))
     ledger = tools.Ledger()
-    out = tools.tool_save_shopping_list({"items": ITEMS, "start_time": "2026-11-09T15:00:00"}, ledger)
+    out = tools.tool_save_shopping_list({"items": ITEMS, "start_time": "2026-11-09T15:00:00", "days_covered": 7,
+                                         "coverage": "déjeuners et dîners, 1 personne",
+                                         "estimated_cost_min_eur": 70, "estimated_cost_max_eur": 55}, ledger)
     assert out["items"] == 3 and "calendar" not in out and not calls
+    lst = store.shopping_list
+    assert (lst["days"], lst["coverage"], lst["cost_min"], lst["cost_max"]) == (7, "déjeuners et dîners, 1 personne", 55, 70)
+    assert lst["recipes"] is None
     assert [i["name"] for i in store.shopping_list["items"]] == ["Bananes", "Riz", "Pommes"]
     assert tools.build_report(ledger, False) == ""   # la checklist suit la réponse, rien à signaler
 
@@ -302,13 +307,14 @@ def test_shopping_checklist_toggle_sync_and_replacement(tmp_path, monkeypatch):
     b, store = _bot(tmp_path, monkeypatch)
     lst = store.set_shopping_list([{"name": "Bananes", "qty": "7", "aisle": "🥦 Fruits"}, {"name": "Riz", "aisle": "🍚 Féculents"}])
     store.attach_shopping_event(lst["id"], "uid-courses")
+    store.state["shopping"].update(days=7, cost_min=55, cost_max=70, coverage="déjeuners et dîners")
     synced = []
     monkeypatch.setattr(bot_module.cs, "set_shopping_description", lambda uid, text: synced.append((uid, text)))
 
     # La checklist part avec la réponse de l'agent
     asyncio.run(b._deliver(agent.AgentReply("Voici ta liste.", shopping_list=lst["id"])))
     text, markup = b.sent[-1]
-    assert "0/2 ✅" in text
+    assert "0/2 ✅" in text and "📆 7 jours · 55–70 € estimés" in text and "🍽️ déjeuners et dîners" in text
     assert _buttons(markup) == [("— 🥦 Fruits —", "s:n"), ("☐ Bananes — 7", f"s:t:{lst['id']}:0"),
                                 ("— 🍚 Féculents —", "s:n"), ("☐ Riz", f"s:t:{lst['id']}:1"),
                                 ("🧹 Tout décocher", f"s:r:{lst['id']}")]
@@ -323,7 +329,8 @@ def test_shopping_checklist_toggle_sync_and_replacement(tmp_path, monkeypatch):
     q = asyncio.run(tap(f"s:t:{lst['id']}:0"))
     new_text, new_markup = q.edits[-1]
     assert "1/2 ✅" in new_text and ("✅ Bananes — 7", f"s:t:{lst['id']}:0") in _buttons(new_markup)
-    assert synced[-1] == ("uid-courses", "🥦 Fruits\n✅ Bananes — 7\n\n🍚 Féculents\n☐ Riz")
+    assert synced[-1][0] == "uid-courses" and synced[-1][1].startswith("Couvre : 7 jours, déjeuners et dîners\nCoût estimé : 55–70 €")
+    assert synced[-1][1].endswith("🥦 Fruits\n✅ Bananes — 7\n\n🍚 Féculents\n☐ Riz")
 
     q = asyncio.run(tap(f"s:t:{lst['id']}:1"))
     assert "tout est dans le panier" in q.edits[-1][0]
@@ -386,3 +393,32 @@ def test_only_the_weekly_review_uses_the_planning_model(tmp_path, monkeypatch):
     assert calls.pop()[1] is False
     asyncio.run(b.weekly_review())
     assert calls.pop()[1] is True
+
+
+
+def test_recipes_generated_once_then_cached_and_regenerated_on_demand(tmp_path, monkeypatch):
+    asked = []
+    b, store = _bot(tmp_path, monkeypatch, asked=asked)
+    replies = []
+
+    async def reply_text(text, **kwargs):
+        replies.append(text)
+
+    def update():
+        return NS(message=NS(reply_text=reply_text), effective_message=NS(reply_text=reply_text),
+                  effective_chat=NS(id=42, send_action=_noop))
+
+    asyncio.run(b.on_recipes(update(), NS(args=[])))
+    assert "Pas de liste" in replies[-1] and not asked
+
+    store.set_shopping_list([{"name": "Poulet", "qty": "800 g"}, {"name": "Riz"}], days=7, coverage="déjeuners")
+    asyncio.run(b.on_recipes(update(), NS(args=[])))
+    prompt, allow_writes = asked[-1]
+    assert allow_writes is False and "- Poulet (800 g)\n- Riz" in prompt and "7 jours, déjeuners" in prompt
+    assert "boîtes" in prompt and "save_shopping_list" in prompt
+    assert store.shopping_list["recipes"] == "débrief"   # réponse (factice) de l'agent mise en cache
+
+    asyncio.run(b.on_recipes(update(), NS(args=[])))      # 2e fois : réaffichée sans IA
+    assert len(asked) == 1 and replies[-1].strip() == "débrief"
+    asyncio.run(b.on_recipes(update(), NS(args=["new"])))  # /recipes new : régénérées
+    assert len(asked) == 2

@@ -265,13 +265,22 @@ class Store:
         lst = self.state["shopping"]
         return None if lst is None else {**lst, "items": [dict(i) for i in lst["items"]]}
 
-    def set_shopping_list(self, items: list[dict]) -> dict:
-        """Nouvelle liste (remplace la précédente). Articles : {name, qty, aisle}, tous décochés."""
+    def set_shopping_list(self, items: list[dict], days: int | None = None, coverage: str | None = None,
+                          cost_min: float | None = None, cost_max: float | None = None) -> dict:
+        """Nouvelle liste (remplace la précédente). Articles : {name, qty, aisle}, tous décochés.
+        days / coverage : ce que la liste couvre ; cost_min / cost_max : coût estimé en euros."""
+        if cost_min is not None and cost_max is not None and cost_max < cost_min:
+            cost_min, cost_max = cost_max, cost_min
         with self._lock:
             lst = {
                 "id": self.state["next_shopping_id"],
                 "items": [{"name": i["name"], "qty": i.get("qty"), "aisle": i.get("aisle"), "done": False}
                           for i in items[:MAX_SHOPPING_ITEMS]],
+                "days": days,
+                "coverage": coverage,
+                "cost_min": cost_min,
+                "cost_max": cost_max,
+                "recipes": None,
                 "event_uid": None,
                 "created": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             }
@@ -288,6 +297,13 @@ class Store:
         with self._lock:
             if (lst := self._current_shopping(list_id)) is not None:
                 lst["event_uid"] = uid
+                self._save()
+
+    def set_recipes(self, list_id, text: str) -> None:
+        """Recettes générées pour cette liste (réaffichées sans IA par /recipes)."""
+        with self._lock:
+            if (lst := self._current_shopping(list_id)) is not None:
+                lst["recipes"] = text
                 self._save()
 
     def toggle_shopping_item(self, list_id, index: int) -> dict | None:

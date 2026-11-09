@@ -287,6 +287,36 @@ def group_by_aisle(items: list[dict]) -> dict[str, list[tuple[int, dict]]]:
     return groups
 
 
+def format_cost(lst: dict) -> str | None:
+    lo, hi = lst.get("cost_min"), lst.get("cost_max")
+    if lo is None and hi is None:
+        return None
+    if lo is None or hi is None or round(lo) == round(hi):
+        return f"~{round(lo if lo is not None else hi)} €"
+    return f"{round(lo)}–{round(hi)} €"
+
+
+def shopping_summary_line(lst: dict) -> str:
+    """« 7 jours · ~55–70 € » : ce que couvre la liste et son coût estimé."""
+    parts = []
+    if lst.get("days"):
+        parts.append(f"{lst['days']} jour{'s' if lst['days'] > 1 else ''}")
+    if cost := format_cost(lst):
+        parts.append(f"{cost} estimés")
+    return " · ".join(parts)
+
+
+def shopping_description(lst: dict) -> str:
+    """Description de l'événement courses : couverture, coût estimé, puis la checklist."""
+    head = []
+    if lst.get("days") or lst.get("coverage"):
+        head.append("Couvre : " + ", ".join(x for x in (lst.get("days") and f"{lst['days']} jours", lst.get("coverage")) if x))
+    if cost := format_cost(lst):
+        head.append(f"Coût estimé : {cost}")
+    head.append("Recettes : /recipes dans Telegram")
+    return "\n".join(head) + "\n\n" + format_checklist(lst["items"])
+
+
 def format_checklist(items: list[dict]) -> str:
     """Articles {name, qty, aisle, done} → checklist texte par rayon (✅ acheté, ☐ à acheter)."""
     return "\n\n".join(
@@ -311,9 +341,10 @@ def _coach_shopping_items(now: datetime.datetime) -> list:
     return found
 
 
-def save_shopping_event(items: list[dict], start: datetime.datetime, end: datetime.datetime) -> dict:
+def save_shopping_event(lst: dict, start: datetime.datetime, end: datetime.datetime) -> dict:
     """Crée l'événement courses (relu sur le serveur) et retire la précédente liste à venir du coach.
     Les événements et tâches que tu crées toi-même dans cet agenda ne sont jamais touchés."""
+    items = lst["items"]
     if not items:
         raise ValueError("liste vide")
     if end <= start:
@@ -323,8 +354,9 @@ def save_shopping_event(items: list[dict], start: datetime.datetime, end: dateti
         raise ValueError("créneau dans le passé : refusé")
     previous = _coach_shopping_items(now)
     uid = f"{uuid.uuid4()}{SHOPPING_UID_SUFFIX}"
-    summary = f"🛒 Courses ({len(items)} articles)"
-    get_shopping_calendar().add_event(build_event(uid, summary, start, end, format_checklist(items)))
+    details = ", ".join(x for x in (f"{len(items)} articles", shopping_summary_line(lst)) if x)
+    summary = f"🛒 Courses ({details})"
+    get_shopping_calendar().add_event(build_event(uid, summary, start, end, shopping_description(lst)))
     try:   # relecture : l'événement doit exister avec le bon créneau avant de supprimer l'ancienne liste
         _, comp = parse_vevent(get_shopping_calendar().get_event_by_uid(uid).data)
     except Exception as e:

@@ -26,6 +26,7 @@ COMMANDS = [
     ("review", [], "Bilan IA de la semaine (prévu vs fait)"),
     ("shopping", [], "Liste de courses selon tes objectifs (7 j, ou /shopping 3)"),
     ("list", [], "Ta liste de courses en cours, à cocher"),
+    ("recipes", [], "Recettes en boîtes pour ta liste de courses"),
     ("briefing", [], "Briefing IA complet et ajustement du programme"),
     ("help", ["start"], "Liste des commandes"),
 ]
@@ -48,6 +49,7 @@ HELP_TEXT = """🏃 *Ton coach running*
 /review — bilan de la semaine : prévu vs fait, forme, semaine prochaine
 /shopping — liste de courses pour 7 jours selon tes objectifs sportifs et santé (/shopping 3 pour 3 jours), à cocher au magasin
 /list — réaffiche ta liste de courses en cours, à cocher
+/recipes — recettes faciles à préparer en boîtes avec ta liste (/recipes new pour en avoir d'autres)
 /briefing — briefing complet, ajuste le programme dans l'agenda
 
 /help — cette aide
@@ -66,6 +68,27 @@ def parse_days(args: list[str], default: int = AGENDA_DEFAULT_DAYS, maximum: int
     return max(1, min(days, maximum))
 
 
+def recipes_prompt(lst: dict) -> str:
+    """Recettes tirées de la liste de courses en cours."""
+    items = "\n".join(f"- {i['name']}" + (f" ({i['qty']})" if i.get("qty") else "") for i in lst["items"])
+    covers = ", ".join(x for x in (lst.get("days") and f"{lst['days']} jours", lst.get("coverage")) if x) or "la période prévue"
+    return (
+        f"Propose les recettes de ma liste de courses actuelle (elle couvre : {covers}) :\n{items}\n\n"
+        "Contraintes : faciles (30 min actives max), efficaces (2 sessions de cuisine max, en batch), adaptées aux boîtes "
+        "(se conservent 3-4 jours au frigo et se réchauffent bien, ou se congèlent), avec surtout les articles de la liste "
+        "(+ basiques du placard : sel, poivre, épices, huile). Relie-les à mes séances et objectifs : plus de glucides la "
+        "veille ou après les séances dures ou longues, protéines pour la récupération, et respecte ma mémoire (goûts, "
+        "allergies, rassasiement).\n"
+        "Format Telegram concis :\n"
+        "- 🗓️ *Plan de batch cooking* : quoi cuisiner quand (ex. dimanche et mercredi) et combien de boîtes.\n"
+        "- Pour chaque recette (4 à 6) : *nom* — nombre de boîtes, temps, conservation (frigo / congélo), ingrédients de la "
+        "liste avec quantités, 3 à 5 étapes courtes, et pour quel moment (déjeuner, dîner, après telle séance).\n"
+        "- 🥣 Petits-déjeuners et collations rapides : 2-3 lignes.\n"
+        "- Une ligne pour un article de la liste non utilisé ou un ingrédient qui manquerait.\n"
+        "Ne modifie pas l'agenda et n'appelle pas save_shopping_list."
+    )
+
+
 def format_goals_reply(goals: list[dict], today: datetime.date) -> str:
     if not goals:
         return ("🎯 *Objectifs*\nAucun objectif enregistré. Dis-moi simplement ta prochaine course (date, distance, chrono "
@@ -81,15 +104,20 @@ def shopping_prompt(days: int, today: datetime.date, save_to_calendar: bool = Fa
         "Base-toi sur : mes objectifs sportifs et de santé, mes préférences, régimes, allergies et contraintes alimentaires "
         "(mémoire) ; les séances prévues dans l'agenda sur cette période (jours durs ou longs : plus de glucides et de "
         "récupération ; jours de repos : plus léger) ; ma charge d'entraînement actuelle.\n"
+        "Pense la liste autour de 4 à 6 recettes faciles et efficaces à préparer à l'avance en boîtes (batch cooking : "
+        "se conservent 3-4 jours au frigo, se réchauffent bien, ou se congèlent), plus petits-déjeuners et collations "
+        "simples ; je demanderai les recettes avec /recipes.\n"
         "Format Telegram, concis :\n"
-        "- 1 ou 2 lignes sur la logique de la période (séances clés, jours de repos).\n"
+        "- 1 ou 2 lignes sur la logique de la période (séances clés, jours de repos) et les recettes prévues (juste leurs noms).\n"
         "- Les articles groupés par rayon avec un émoji (fruits et légumes, protéines, féculents, produits frais, épicerie, "
         "surgelés…), avec des quantités totales réalistes pour la période (dans save_shopping_list).\n"
         "- Au plus 3 repères pratiques liés aux séances (ex. collation avant le fractionné de mardi).\n"
         "S'il te manque une information essentielle (nombre de personnes, régime, allergies), fais une hypothèse raisonnable, "
         "dis-la en une ligne et demande-la-moi. Ne modifie pas l'agenda."
-        + " Une fois la liste finalisée, enregistre-la avec save_shopping_list (articles, quantités, rayons) : je la reçois "
-          "en checklist à cocher, donc ne la recopie pas en entier dans ta réponse."
+        + " Une fois la liste finalisée, enregistre-la avec save_shopping_list (articles, quantités, rayons, nombre de jours "
+          f"couverts ({days}), repas couverts, et coût total estimé en fourchette d'euros, prix d'un supermarché français "
+          "courant) : je la reçois en checklist à cocher avec ces informations en tête, donc ne la recopie pas en entier "
+          "dans ta réponse."
         + (" Donne aussi start_time : le créneau de courses ou de commande que je préfère (mémoire) ; à défaut, choisis "
            "un créneau raisonnable et dis-le." if save_to_calendar else "")
     )

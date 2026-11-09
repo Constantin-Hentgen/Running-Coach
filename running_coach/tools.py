@@ -143,7 +143,16 @@ def tool_save_shopping_list(args: dict, ledger: Ledger) -> dict:
         items.append({"name": name, "qty": qty, "aisle": (it.get("aisle") or "").strip() or None})
     if not items:
         raise ValueError("liste vide")
-    lst = store.set_shopping_list(items)
+    def number(key):
+        try:
+            return float(args[key]) if args.get(key) not in (None, "") else None
+        except (TypeError, ValueError):
+            return None
+
+    days = number("days_covered")
+    lst = store.set_shopping_list(items, days=int(days) if days else None,
+                                  coverage=" ".join(str(args.get("coverage") or "").split())[:200] or None,
+                                  cost_min=number("estimated_cost_min_eur"), cost_max=number("estimated_cost_max_eur"))
     ledger.record("shopping", f"{len(lst['items'])} article(s)", True, detail=str(lst["id"]))
     result = {"ok": True, "items": len(lst["items"]), "checklist": "envoyée sous ta réponse, à cocher dans Telegram"}
 
@@ -151,7 +160,7 @@ def tool_save_shopping_list(args: dict, ledger: Ledger) -> dict:
         try:
             start = cs.parse_dt(args["start_time"])
             end = start + datetime.timedelta(minutes=int(args.get("duration_minutes") or 30))
-            r = cs.save_shopping_event(lst["items"], start, end)
+            r = cs.save_shopping_event(lst, start, end)
         except Exception as e:
             ledger.record("shopping_event", "agenda courses", False, str(e))
             return {**result, "calendar": f"échec : {type(e).__name__}: {e}"}
@@ -331,6 +340,10 @@ SHOPPING_TOOLS = [
         "input_schema": {
             "type": "object",
             "properties": {
+                "days_covered": {"type": "integer", "description": "nombre de jours que la liste couvre"},
+                "coverage": {"type": "string", "description": "repas couverts, ex: « petits-déj, déjeuners en boîte, dîners, collations ; 1 personne »"},
+                "estimated_cost_min_eur": {"type": "number", "description": "coût total estimé, bas de la fourchette (€, supermarché français courant)"},
+                "estimated_cost_max_eur": {"type": "number", "description": "coût total estimé, haut de la fourchette (€)"},
                 "start_time": {"type": "string", "description": "ISO datetime, futur, ex: 2026-11-09T15:00:00 (fuseau local)"},
                 "duration_minutes": {"type": "integer", "description": "durée de l'événement, 30 par défaut"},
                 "items": {
@@ -346,7 +359,7 @@ SHOPPING_TOOLS = [
                     },
                 },
             },
-            "required": ["items"],
+            "required": ["items", "days_covered", "estimated_cost_min_eur", "estimated_cost_max_eur"],
         },
     },
 ]
