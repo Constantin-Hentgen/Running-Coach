@@ -90,6 +90,7 @@ def _weekly_time(value: str | None) -> tuple[int, int, int] | None:
 
 
 def _optional_model(value: str | None) -> str | None:
+    """Valeur, ou None si vide ou « off » (modèle Whisper, URL de la liste de courses…)."""
     return None if not value or value.lower() in ("off", "non", "no", "none", "0") else value
 
 
@@ -164,7 +165,9 @@ class Settings:
             radicale_url=_str("RADICALE_URL"),
             radicale_user=_str("RADICALE_USER"),
             radicale_pass=_str("RADICALE_PASS"),
-            radicale_tasks_url=_str("RADICALE_TASKS_URL"),
+            # Liste de courses : par défaut la même collection que le calendrier (Radicale gère événements et tâches
+            # dans une même collection) ; une autre URL pour une liste séparée ; « off » pour désactiver.
+            radicale_tasks_url=_optional_model(_str("RADICALE_TASKS_URL") or _str("RADICALE_URL")),
             dreeve_url=dreeve_url,
             dreeve_api_key=_str("DREEVE_API_KEY"),
             dreeve_mcp_key=_str("DREEVE_MCP_KEY"),

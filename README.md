@@ -127,7 +127,7 @@ To update: *Pull and redeploy* (no need to re-pull images, the image is built fr
 
 | Variable | Default | Description |
 |---|---|---|
-| `RADICALE_TASKS_URL` | — | **Full** URL of a Radicale **task list** (VTODO collection, separate from the calendar). `/shopping` saves the list there as checkable tasks (e.g. Tasks.org + DAVx⁵ on Android, Reminders on iPhone). Each new list replaces only the items the coach created. Empty = list in Telegram only |
+| `RADICALE_TASKS_URL` | `RADICALE_URL` | Where `/shopping` saves the list as checkable tasks (VTODO), e.g. for Tasks.org + DAVx⁵ on Android or Reminders on iPhone. By default the calendar's own collection, which Radicale lets hold events, journals and tasks together; set another **full** URL for a separate task list, or `off` to keep the list in Telegram only. Each new list replaces only the items the coach created; your own tasks are never touched |
 
 ### Dreeve
 
@@ -210,7 +210,7 @@ Just talk to it (in French), for example:
 | `/memory` | Shows everything the coach knows about you, with each memory's number |
 | `/debrief` | AI debrief of your latest run (same 4 parts as the automatic one, read-only), then the check-in if not done yet |
 | `/review` | AI review of the current week: planned vs done, form, goals, next week |
-| `/shopping` | AI shopping list for the next 7 days (`/shopping 3` for 3, max 14), built from your sport and health goals, food preferences in memory, and the sessions planned over that period; also saved to Radicale if `RADICALE_TASKS_URL` is set |
+| `/shopping` | AI shopping list for the next 7 days (`/shopping 3` for 3, max 14), built from your sport and health goals, food preferences in memory, and the sessions planned over that period; also saved as checkable tasks in Radicale (`RADICALE_TASKS_URL`) |
 | `/briefing` | Runs the full briefing now: reviews everything and adjusts the plan in your calendar |
 | `/help` (or `/start`) | Lists the commands |
 
@@ -335,7 +335,7 @@ Tests need no keys and no network: Claude, Dreeve and MCP calls are mocked. They
 | `[RADICALE] Échec de connexion CalDAV` | `RADICALE_URL` must point to the **calendar** (with its ID), not the server root |
 | Sessions are one hour off | Check `COACH_TZ` |
 | No weather in replies | `WEATHER_LOCATIONS` empty or malformed (startup fails with an explicit message if the format is wrong) |
-| `❌ Liste de courses non enregistrée dans Radicale` | `RADICALE_TASKS_URL` must point to a **task list** (VTODO collection) with its ID; create one in your tasks app or Radicale's web UI |
+| `❌ Liste de courses non enregistrée dans Radicale` | The collection doesn't accept tasks (VTODO): set `RADICALE_TASKS_URL` to a task list's full URL, or `off` |
 | First voice note is slow | Expected: the Whisper model is downloaded once (`[VOIX] Chargement du modèle …` in the logs), then kept in memory |
 | Voice transcription is often wrong | Try `WHISPER_MODEL=medium` (more accurate, slower, ~1.5 GB) |
 

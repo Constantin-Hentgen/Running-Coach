@@ -37,3 +37,13 @@ def test_str_strips_quotes_and_treats_empty_as_unset(monkeypatch):
 
 def test_briefing_off():
     assert config._briefing_time("off") is None and config._briefing_time("07:30") == (7, 30)
+
+
+def test_shopping_task_list_defaults_to_calendar_and_can_be_disabled(monkeypatch):
+    monkeypatch.setenv("RADICALE_URL", "https://dav.example/me/cal/")
+    monkeypatch.delenv("RADICALE_TASKS_URL", raising=False)
+    assert config.Settings.from_env().radicale_tasks_url == "https://dav.example/me/cal/"
+    monkeypatch.setenv("RADICALE_TASKS_URL", "https://dav.example/me/tasks/")
+    assert config.Settings.from_env().radicale_tasks_url == "https://dav.example/me/tasks/"
+    monkeypatch.setenv("RADICALE_TASKS_URL", "off")
+    assert config.Settings.from_env().radicale_tasks_url is None
