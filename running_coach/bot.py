@@ -88,6 +88,24 @@ def proposals_markup(proposals: list[tuple[int, str]]) -> tuple[str, InlineKeybo
     return "\n".join(lines), InlineKeyboardMarkup(rows)
 
 
+def shopping_text(lst: dict) -> str:
+    done = sum(i["done"] for i in lst["items"])
+    total = len(lst["items"])
+    status = "tout est dans le panier 🎉" if done == total else f"{done}/{total} ✅"
+    return f"🛒 *Liste de courses* — {status}\n_Touche un article quand il est dans le panier._"
+
+
+def shopping_markup(lst: dict) -> InlineKeyboardMarkup:
+    """Un bouton par article (☐ → ✅), précédé d'un bouton-titre par rayon ; « Tout décocher » en bas."""
+    lid, rows = lst["id"], []
+    for aisle, entries in cs.group_by_aisle(lst["items"]).items():
+        rows.append([InlineKeyboardButton(f"— {aisle} —", callback_data="s:n")])
+        rows += [[InlineKeyboardButton(f"{'✅' if item['done'] else '☐'} {cs.item_label(item)}", callback_data=f"s:t:{lid}:{i}")]
+                 for i, item in entries]
+    rows.append([InlineKeyboardButton("🧹 Tout décocher", callback_data=f"s:r:{lid}")])
+    return InlineKeyboardMarkup(rows)
+
+
 def rpe_markup(activity_id) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[InlineKeyboardButton(str(n), callback_data=f"c:r:{activity_id}:{n}") for n in row]
                                  for row in ((1, 2, 3, 4, 5), (6, 7, 8, 9, 10))])
@@ -104,6 +122,8 @@ class CoachBot:
         self.app = app
         self.chat_id = settings.telegram_chat_id
         self._activity_lock = asyncio.Lock()   # jamais deux détections en parallèle (pas de double débrief)
+        self._shopping_sync_lock = asyncio.Lock()   # écritures de la checklist dans l'agenda courses, une à la fois
+        self._background: set[asyncio.Task] = set()
 
     # --- Envoi ---------------------------------------------------------------
 
@@ -120,6 +140,8 @@ class CoachBot:
         footer, markup = proposals_markup(reply.proposals)
         text = "\n\n".join(part for part in (header, reply.text, footer) if part)
         await send_text(self._sender(update), text, markup)
+        if reply.shopping_list is not None and (lst := store.shopping_list) and lst["id"] == reply.shopping_list:
+            await send_text(self._sender(update), shopping_text(lst), shopping_markup(lst))
 
     async def _authorized(self, update: Update) -> bool:
         """Le bot peut modifier l'agenda : il ne répond qu'au chat TELEGRAM_CHAT_ID.
@@ -220,6 +242,16 @@ class CoachBot:
             "*🧠 Ce que je sais de toi*\n" + md_escape(store.render())
             + "\n\n_Pour corriger : « oublie le #3 » ou dis-moi simplement ce qui a changé._"))
 
+    async def on_list(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """/list : réaffiche la liste de courses en cours, à cocher (sans IA)."""
+        if not update.message or not await self._authorized(update):
+            return
+        lst = store.shopping_list
+        if lst is None:
+            await update.message.reply_text("🛒 Pas de liste de courses en cours. Lance /shopping pour en créer une.")
+            return
+        await send_text(update.message.reply_text, shopping_text(lst), shopping_markup(lst))
+
     async def on_goals(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await self._command(update, lambda: commands.format_goals_reply(store.goals, datetime.datetime.now(TZ).date()))
 
@@ -299,6 +331,8 @@ class CoachBot:
                 await self._on_proposal(update, parts[1], parts[2])
             elif parts[0] == "c":
                 await self._on_checkin(update, parts[1], parts[2], parts[3])
+            elif parts[0] == "s":
+                await self._on_shopping_button(update, parts)
             else:
                 await query.answer()
         except Exception:
@@ -325,6 +359,39 @@ class CoachBot:
             await agent.add_to_history(self.chat_id, f"[L'athlète a ignoré ta proposition : {item['text']}]",
                                        "D'accord, on garde le programme tel quel.")
             await self._push("👍 On garde le programme tel quel.")
+
+    async def _on_shopping_button(self, update: Update, parts: list[str]) -> None:
+        query = update.callback_query
+        if parts[1] == "n":   # titre de rayon : rien à faire
+            await query.answer()
+            return
+        lst = (store.toggle_shopping_item(parts[2], int(parts[3])) if parts[1] == "t"
+               else store.reset_shopping(parts[2]))
+        if lst is None:
+            await query.answer("Cette liste a été remplacée : /list affiche la liste en cours.", show_alert=True)
+            return
+        await query.answer()
+        try:
+            await query.edit_message_text(shopping_text(lst), parse_mode=ParseMode.MARKDOWN, reply_markup=shopping_markup(lst))
+        except BadRequest as e:
+            if "not modified" not in str(e).lower():   # « Tout décocher » sur une liste déjà vierge
+                raise
+        if lst.get("event_uid"):
+            task = asyncio.create_task(self._sync_shopping_event(lst["id"]))
+            self._background.add(task)
+            task.add_done_callback(self._background.discard)
+
+    async def _sync_shopping_event(self, list_id: int) -> None:
+        """Recopie les cases cochées dans la description de l'événement courses. Les écritures passent une par une
+        et relisent l'état courant : après une série de clics rapides, l'agenda finit sur le dernier état."""
+        async with self._shopping_sync_lock:
+            lst = store.shopping_list
+            if lst is None or lst["id"] != list_id or not lst.get("event_uid"):
+                return
+            try:
+                await asyncio.to_thread(cs.set_shopping_description, lst["event_uid"], cs.format_checklist(lst["items"]))
+            except Exception as e:
+                logger.error(f"Checklist non recopiée dans l'agenda courses : {e}")
 
     async def _on_checkin(self, update: Update, step: str, activity_id: str, value: str) -> None:
         query = update.callback_query
@@ -453,7 +520,7 @@ def build_bot() -> CoachBot:
     bot = CoachBot(app)
     handlers = {
         "plan": bot.on_agenda, "load": bot.on_form, "runs": bot.on_last_runs, "weather": bot.on_weather,
-        "goals": bot.on_goals, "memory": bot.on_memory, "debrief": bot.on_debrief, "review": bot.on_review,
+        "goals": bot.on_goals, "memory": bot.on_memory, "list": bot.on_list, "debrief": bot.on_debrief, "review": bot.on_review,
         "shopping": bot.on_shopping, "briefing": bot.on_briefing, "help": bot.on_help,
     }
     for name, aliases, _ in commands.COMMANDS:

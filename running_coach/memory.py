@@ -24,6 +24,7 @@ GOAL_PRIORITIES = ["A", "B", "C"]
 MAX_GOALS = 15
 MAX_CHECKINS = 60
 PROPOSAL_TTL_DAYS = 14
+MAX_SHOPPING_ITEMS = 60   # boutons Telegram : 100 max par message, rayons compris
 LEGS = {"fraiches": "fraîches", "normales": "normales", "lourdes": "lourdes", "douleur": "douleur"}
 
 
@@ -70,6 +71,8 @@ class Store:
         state.setdefault("proposals", {})     # id → {text, kind, created, status}
         state.setdefault("next_proposal_id", 1)
         state.setdefault("checkins", {})      # id d'activité → {date, minutes, name, rpe, legs}
+        state.setdefault("shopping", None)    # liste de courses en cours : {id, items, event_uid, created}
+        state.setdefault("next_shopping_id", 1)
         # clé séance → {until, hazards, cleared} ; migre l'ancien format « rain_alerts » (clé → fin du créneau)
         alerts = state.setdefault("weather_alerts", {})
         for key, until in state.pop("rain_alerts", {}).items():
@@ -254,6 +257,58 @@ class Store:
             item["status"] = status
             self._save()
             return dict(item)
+
+    # --- liste de courses à cocher -----------------------------------------------------
+
+    @property
+    def shopping_list(self) -> dict | None:
+        lst = self.state["shopping"]
+        return None if lst is None else {**lst, "items": [dict(i) for i in lst["items"]]}
+
+    def set_shopping_list(self, items: list[dict]) -> dict:
+        """Nouvelle liste (remplace la précédente). Articles : {name, qty, aisle}, tous décochés."""
+        with self._lock:
+            lst = {
+                "id": self.state["next_shopping_id"],
+                "items": [{"name": i["name"], "qty": i.get("qty"), "aisle": i.get("aisle"), "done": False}
+                          for i in items[:MAX_SHOPPING_ITEMS]],
+                "event_uid": None,
+                "created": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            }
+            self.state["next_shopping_id"] += 1
+            self.state["shopping"] = lst
+            self._save()
+        return self.shopping_list
+
+    def _current_shopping(self, list_id) -> dict | None:
+        lst = self.state["shopping"]
+        return lst if lst is not None and lst["id"] == int(list_id) else None
+
+    def attach_shopping_event(self, list_id, uid: str) -> None:
+        with self._lock:
+            if (lst := self._current_shopping(list_id)) is not None:
+                lst["event_uid"] = uid
+                self._save()
+
+    def toggle_shopping_item(self, list_id, index: int) -> dict | None:
+        """Coche / décoche un article ; None si la liste a été remplacée depuis."""
+        with self._lock:
+            lst = self._current_shopping(list_id)
+            if lst is None or not 0 <= index < len(lst["items"]):
+                return None
+            lst["items"][index]["done"] = not lst["items"][index]["done"]
+            self._save()
+        return self.shopping_list
+
+    def reset_shopping(self, list_id) -> dict | None:
+        with self._lock:
+            lst = self._current_shopping(list_id)
+            if lst is None:
+                return None
+            for item in lst["items"]:
+                item["done"] = False
+            self._save()
+        return self.shopping_list
 
     # --- ressenti après séance --------------------------------------------------------
 

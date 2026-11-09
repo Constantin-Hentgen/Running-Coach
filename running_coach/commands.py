@@ -25,6 +25,7 @@ COMMANDS = [
     ("debrief", [], "Débrief IA de ton dernier run"),
     ("review", [], "Bilan IA de la semaine (prévu vs fait)"),
     ("shopping", [], "Liste de courses selon tes objectifs (7 j, ou /shopping 3)"),
+    ("list", [], "Ta liste de courses en cours, à cocher"),
     ("briefing", [], "Briefing IA complet et ajustement du programme"),
     ("help", ["start"], "Liste des commandes"),
 ]
@@ -45,7 +46,8 @@ HELP_TEXT = """🏃 *Ton coach running*
 *Avec le coach* (IA)
 /debrief — débrief de ton dernier run
 /review — bilan de la semaine : prévu vs fait, forme, semaine prochaine
-/shopping — liste de courses pour 7 jours selon tes objectifs sportifs et santé (/shopping 3 pour 3 jours)
+/shopping — liste de courses pour 7 jours selon tes objectifs sportifs et santé (/shopping 3 pour 3 jours), à cocher au magasin
+/list — réaffiche ta liste de courses en cours, à cocher
 /briefing — briefing complet, ajuste le programme dans l'agenda
 
 /help — cette aide
@@ -81,15 +83,15 @@ def shopping_prompt(days: int, today: datetime.date, save_to_calendar: bool = Fa
         "récupération ; jours de repos : plus léger) ; ma charge d'entraînement actuelle.\n"
         "Format Telegram, concis :\n"
         "- 1 ou 2 lignes sur la logique de la période (séances clés, jours de repos).\n"
-        "- La liste groupée par rayon avec un émoji (fruits et légumes, protéines, féculents, produits frais, épicerie, "
-        "surgelés…), avec des quantités totales réalistes pour la période.\n"
+        "- Les articles groupés par rayon avec un émoji (fruits et légumes, protéines, féculents, produits frais, épicerie, "
+        "surgelés…), avec des quantités totales réalistes pour la période (dans save_shopping_list).\n"
         "- Au plus 3 repères pratiques liés aux séances (ex. collation avant le fractionné de mardi).\n"
         "S'il te manque une information essentielle (nombre de personnes, régime, allergies), fais une hypothèse raisonnable, "
         "dis-la en une ligne et demande-la-moi. Ne modifie pas l'agenda."
-        + (" Une fois la liste finalisée, enregistre-la aussi avec save_shopping_list (mêmes articles et rayons) dans "
-           "l'agenda courses, au créneau de courses ou de commande que je préfère (mémoire) ; à défaut, choisis un "
-           "créneau raisonnable et dis-le."
-           if save_to_calendar else "")
+        + " Une fois la liste finalisée, enregistre-la avec save_shopping_list (articles, quantités, rayons) : je la reçois "
+          "en checklist à cocher, donc ne la recopie pas en entier dans ta réponse."
+        + (" Donne aussi start_time : le créneau de courses ou de commande que je préfère (mémoire) ; à défaut, choisis "
+           "un créneau raisonnable et dis-le." if save_to_calendar else "")
     )
 
 

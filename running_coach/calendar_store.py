@@ -275,12 +275,23 @@ def get_shopping_calendar():
     return client.calendar(url=settings.radicale_shopping_url)
 
 
-def format_checklist(items: list[tuple[str, str | None, str | None]]) -> str:
-    """[(article, quantité, rayon)] → checklist groupée par rayon, dans l'ordre d'apparition des rayons."""
-    groups: dict[str, list[str]] = {}
-    for name, qty, aisle in items:
-        groups.setdefault(aisle or "🛒 Divers", []).append(f"☐ {name}" + (f" — {qty}" if qty else ""))
-    return "\n\n".join(f"{aisle}\n" + "\n".join(lines) for aisle, lines in groups.items())
+def item_label(item: dict) -> str:
+    return item["name"] + (f" — {item['qty']}" if item.get("qty") else "")
+
+
+def group_by_aisle(items: list[dict]) -> dict[str, list[tuple[int, dict]]]:
+    """Rayon → [(index, article)], dans l'ordre d'apparition des rayons."""
+    groups: dict[str, list[tuple[int, dict]]] = {}
+    for i, item in enumerate(items):
+        groups.setdefault(item.get("aisle") or "🛒 Divers", []).append((i, item))
+    return groups
+
+
+def format_checklist(items: list[dict]) -> str:
+    """Articles {name, qty, aisle, done} → checklist texte par rayon (✅ acheté, ☐ à acheter)."""
+    return "\n\n".join(
+        f"{aisle}\n" + "\n".join(f"{'✅' if item.get('done') else '☐'} {item_label(item)}" for _, item in entries)
+        for aisle, entries in group_by_aisle(items).items())
 
 
 def _coach_shopping_items(now: datetime.datetime) -> list:
@@ -300,8 +311,7 @@ def _coach_shopping_items(now: datetime.datetime) -> list:
     return found
 
 
-def save_shopping_event(items: list[tuple[str, str | None, str | None]], start: datetime.datetime,
-                        end: datetime.datetime) -> dict:
+def save_shopping_event(items: list[dict], start: datetime.datetime, end: datetime.datetime) -> dict:
     """Crée l'événement courses (relu sur le serveur) et retire la précédente liste à venir du coach.
     Les événements et tâches que tu crées toi-même dans cet agenda ne sont jamais touchés."""
     if not items:
@@ -325,3 +335,13 @@ def save_shopping_event(items: list[tuple[str, str | None, str | None]], start: 
     for obj in previous:
         obj.delete()
     return {"uid": uid, "summary": summary, "start": c_start, "end": c_end, "replaced": len(previous)}
+
+
+def set_shopping_description(uid: str, description: str) -> None:
+    """Met à jour la checklist (articles cochés) dans la description de l'événement courses ; relu sur le serveur."""
+    obj = get_shopping_calendar().get_event_by_uid(uid)
+    obj.data = apply_update(obj.data, description=description)
+    obj.save()
+    _, comp = parse_vevent(get_shopping_calendar().get_event_by_uid(uid).data)
+    if _text(comp, "DESCRIPTION") != description:
+        raise RuntimeError("relecture : la checklist n'a pas été mise à jour sur Radicale")

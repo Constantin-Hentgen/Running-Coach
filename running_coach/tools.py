@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class Action:
-    kind: str       # create | update | delete | remember | forget | goal | goal_remove | proposal | shopping
+    kind: str       # create | update | delete | remember | forget | goal | goal_remove | proposal | shopping | shopping_event
     label: str
     ok: bool
     detail: str = ""
@@ -133,23 +133,33 @@ def tool_propose_change(args: dict, ledger: Ledger) -> dict:
 
 
 def tool_save_shopping_list(args: dict, ledger: Ledger) -> dict:
+    """Checklist Telegram à cocher (toujours) + événement dans l'agenda courses (si configuré et heure fournie)."""
     items = []
     for it in args.get("items") or []:
         name = " ".join(str(it.get("name") or "").split())
         if not name:
             continue
         qty = " ".join(str(it.get("quantity") or "").split()) or None
-        items.append((name, qty, (it.get("aisle") or "").strip() or None))
-    try:
-        start = cs.parse_dt(args["start_time"])
-        end = start + datetime.timedelta(minutes=int(args.get("duration_minutes") or 30))
-        r = cs.save_shopping_event(items, start, end)
-    except Exception as e:
-        ledger.record("shopping", f"{len(items)} article(s)", False, str(e))
-        raise
-    ledger.record("shopping", f"{cs.fmt_when(r['start'], r['end'])}, {len(items)} article(s)", True)
-    return {"ok": True, "uid": r["uid"], "start": r["start"].astimezone(cs.TZ).isoformat(timespec="minutes"),
-            "items": len(items), "previous_list_replaced": r["replaced"]}
+        items.append({"name": name, "qty": qty, "aisle": (it.get("aisle") or "").strip() or None})
+    if not items:
+        raise ValueError("liste vide")
+    lst = store.set_shopping_list(items)
+    ledger.record("shopping", f"{len(lst['items'])} article(s)", True, detail=str(lst["id"]))
+    result = {"ok": True, "items": len(lst["items"]), "checklist": "envoyée sous ta réponse, à cocher dans Telegram"}
+
+    if settings.radicale_shopping_url and args.get("start_time"):
+        try:
+            start = cs.parse_dt(args["start_time"])
+            end = start + datetime.timedelta(minutes=int(args.get("duration_minutes") or 30))
+            r = cs.save_shopping_event(lst["items"], start, end)
+        except Exception as e:
+            ledger.record("shopping_event", "agenda courses", False, str(e))
+            return {**result, "calendar": f"échec : {type(e).__name__}: {e}"}
+        store.attach_shopping_event(lst["id"], r["uid"])
+        ledger.record("shopping_event", cs.fmt_when(r["start"], r["end"]), True)
+        result["calendar"] = {"start": r["start"].astimezone(cs.TZ).isoformat(timespec="minutes"),
+                              "previous_list_replaced": r["replaced"]}
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -300,17 +310,23 @@ PROPOSE_TOOL = {
     },
 }
 
+_SHOPPING_CALENDAR = (
+    " Elle est aussi enregistrée comme UN ÉVÉNEMENT dans l'agenda COURSES dédié (séparé de l'agenda d'entraînement) au "
+    "créneau start_time, avec la checklist par rayon dans sa description, tenue à jour quand l'athlète coche ; cela "
+    "remplace la précédente liste à venir du coach, et ce que l'athlète a créé lui-même n'est jamais touché. Heure : "
+    "celle demandée, sinon sa préférence en mémoire, sinon un créneau raisonnable que tu annonces."
+    if settings.radicale_shopping_url else " (Aucun agenda courses n'est configuré : start_time est ignoré.)"
+)
+
 SHOPPING_TOOLS = [
     {
         "name": "save_shopping_list",
         "description": (
-            "Enregistre la liste de courses comme UN ÉVÉNEMENT dans l'agenda COURSES dédié de l'athlète (séparé de l'agenda "
-            "d'entraînement), au créneau voulu, avec la checklist par rayon dans sa description. Remplace la précédente liste "
-            "à venir du coach ; ce que l'athlète a créé lui-même n'est jamais touché. C'est le SEUL moyen d'enregistrer une "
-            "liste de courses (jamais create_calendar_event) : à appeler quand l'athlète demande une liste de courses, ou de "
-            "l'enregistrer / la mettre dans l'agenda / à une heure donnée, une fois la liste finalisée. Si la liste existe déjà "
-            "dans la conversation, réutilise-la telle quelle. Heure : celle demandée, sinon sa préférence en mémoire, sinon "
-            "un créneau raisonnable que tu annonces."
+            "Enregistre la liste de courses : l'athlète la reçoit dans Telegram sous ta réponse, avec un bouton par article "
+            "à cocher au magasin." + _SHOPPING_CALENDAR + " C'est le SEUL moyen d'enregistrer une liste de courses (jamais "
+            "create_calendar_event) : à appeler quand l'athlète demande une liste de courses ou de l'enregistrer / la mettre "
+            "dans l'agenda, une fois la liste finalisée. Si la liste existe déjà dans la conversation, réutilise-la telle "
+            "quelle. Ne recopie pas la liste complète dans ta réponse : la checklist l'affiche déjà."
         ),
         "input_schema": {
             "type": "object",
@@ -330,10 +346,10 @@ SHOPPING_TOOLS = [
                     },
                 },
             },
-            "required": ["items", "start_time"],
+            "required": ["items"],
         },
     },
-] if settings.radicale_shopping_url else []
+]
 
 _COMMON = [*MEMORY_TOOLS, *GOAL_TOOLS, PROPOSE_TOOL, *SHOPPING_TOOLS]
 ALL_TOOLS = [LIST_TOOL, *WRITE_TOOLS, *_COMMON]
@@ -387,9 +403,9 @@ def build_report(ledger: Ledger, truncated: bool, error: str | None = None) -> s
     if memory:
         lines += [f"{_MEMORY_ICONS[a.kind]} : {md_escape(a.label)}" for a in memory]
     for a in ledger.actions:
-        if a.kind == "shopping":
-            lines.append(f"🛒 Liste de courses enregistrée dans l'agenda courses : {md_escape(a.label)}" if a.ok
-                         else f"❌ Liste de courses non enregistrée dans Radicale : {md_escape(a.detail)}")
+        if a.kind == "shopping_event":
+            lines.append(f"📅 Liste de courses ajoutée à l'agenda courses : {md_escape(a.label)}" if a.ok
+                         else f"❌ Liste de courses non ajoutée à l'agenda courses : {md_escape(a.detail)}")
     if truncated:
         lines.append("⚠️ Traitement interrompu (limite atteinte) : l'opération est peut-être incomplète, vérifie l'agenda.")
     if error:

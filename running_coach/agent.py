@@ -61,7 +61,7 @@ DONNÉES DREEVE (lecture seule) :
 NUTRITION :
 - Tu conseilles aussi l'alimentation, au service des objectifs sportifs ET de santé de la mémoire, en tenant compte des séances prévues (jours durs ou longs : plus de glucides et de récupération ; repos : plus léger).
 - Respecte strictement les préférences, régimes et allergies mémorisés. Pas d'avis médical : pour une pathologie, renvoie vers un professionnel.
-- Une liste de courses (alimentaires) ne va JAMAIS dans l'agenda d'entraînement : pas de `create_calendar_event` pour des courses, un repas ou une commande. Pour la mettre dans un agenda (à une heure donnée), utilise uniquement `save_shopping_list`, qui crée l'événement dans l'agenda courses dédié. Si l'outil n'est pas disponible, la liste reste dans le message.
+- Une liste de courses (alimentaires) ne va JAMAIS dans l'agenda d'entraînement : pas de `create_calendar_event` pour des courses, un repas ou une commande. Pour l'enregistrer (checklist à cocher dans Telegram, et événement dans l'agenda courses dédié s'il est configuré), utilise uniquement `save_shopping_list`.
 
 FORMAT TELEGRAM : listes à puces (`-`), gras (`*texte*`), émojis sobres. ZÉRO TABLEAU (pas de `|`).
 """.strip()
@@ -86,9 +86,11 @@ _lock = asyncio.Lock()   # une seule exécution à la fois : pas d'écritures co
 
 @dataclass
 class AgentReply:
-    """Texte à envoyer (compte-rendu inclus) + propositions enregistrées pendant le run [(id, texte)]."""
+    """Texte à envoyer (compte-rendu inclus) + propositions enregistrées pendant le run [(id, texte)]
+    + id de la liste de courses créée pendant le run (checklist à envoyer)."""
     text: str
     proposals: list[tuple[int, str]] = field(default_factory=list)
+    shopping_list: int | None = None
 
 
 def _system_blocks() -> list[dict]:
@@ -234,4 +236,5 @@ async def ask(user_prompt: str, chat_id: str = "default", allow_writes: bool = T
 
         logger.info(f"Agent terminé ({model}) : {ledger.ok_count}/{len(ledger)} action(s) réussie(s), "
                     f"{len(proposals)} proposition(s), truncated={truncated}, error={error}")
-        return AgentReply(final_text, proposals)
+        shopping = next((int(a.detail) for a in reversed(ledger.actions) if a.kind == "shopping" and a.ok), None)
+        return AgentReply(final_text, proposals, shopping)

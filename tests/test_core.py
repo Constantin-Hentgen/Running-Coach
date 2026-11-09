@@ -256,12 +256,13 @@ def test_shopping_event_replaces_only_coachs_upcoming_list(monkeypatch):
     fake.add("BEGIN:VCALENDAR\nVERSION:2.0\nBEGIN:VTODO\nUID:t@running-coach-shopping\nSUMMARY:Bananes\nEND:VTODO\nEND:VCALENDAR\n")
 
     start = now + datetime.timedelta(hours=3)
-    items = [("Bananes", "7", "🥦 Fruits et légumes"), ("Riz", "500 g", "🍚 Féculents"), ("Pommes", None, "🥦 Fruits et légumes")]
+    items = [{"name": "Bananes", "qty": "7", "aisle": "🥦 Fruits et légumes"}, {"name": "Riz", "qty": "500 g", "aisle": "🍚 Féculents"},
+             {"name": "Pommes", "aisle": "🥦 Fruits et légumes", "done": True}]
     r = cs.save_shopping_event(items, start, start + datetime.timedelta(minutes=30))
     assert r["replaced"] == 2 and r["summary"] == "🛒 Courses (3 articles)"
     uids = {next(line for line in o.data.splitlines() if line.startswith("UID:")) for o in fake.objs}
     assert uids == {"UID:mine@phone", "UID:old@running-coach-shopping", f"UID:{r['uid']}"}
     _, comp = cs.parse_vevent(fake.get_event_by_uid(r["uid"]).data)
-    assert str(comp["DESCRIPTION"]) == "🥦 Fruits et légumes\n☐ Bananes — 7\n☐ Pommes\n\n🍚 Féculents\n☐ Riz — 500 g"
+    assert str(comp["DESCRIPTION"]) == "🥦 Fruits et légumes\n☐ Bananes — 7\n✅ Pommes\n\n🍚 Féculents\n☐ Riz — 500 g"
     with pytest.raises(ValueError):
         cs.save_shopping_event(items, earlier, earlier + hour)   # passé refusé

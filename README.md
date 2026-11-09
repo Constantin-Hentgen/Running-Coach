@@ -28,7 +28,7 @@ Coach▸ Dimanche est sec (12°C, vent faible) : sortie longue déplacée à 9h0
 - **One-tap proposals**: when the coach suggests a change without making it, buttons let you ✅ apply, ✏️ adjust or ❌ ignore it.
 - **Voice messages**: talk to the coach; voice notes are transcribed **locally** with Whisper, nothing leaves your server.
 - **Persistent memory**: the coach remembers your preferences, habits, constraints, goals, injuries, food preferences and gear, and applies them every time it plans.
-- **Nutrition**: `/shopping` gives a shopping list for the coming days, matched to your sport and health goals and to the sessions in your calendar, and can put it in your shopping calendar as an event with the checklist.
+- **Nutrition**: `/shopping` gives a shopping list for the coming days, matched to your sport and health goals and to the sessions in your calendar, sent as a **checklist in Telegram** (one button per item, tap to tick ✅ at the store), and optionally added to your shopping calendar as an event whose checklist follows your ticks.
 - **Weather alerts**: a Telegram message when rain, heat, strong gusts or ice are forecast during an upcoming session, with your other training place's forecast for comparison, an « Adapter » button, and a « bonne nouvelle » message if the forecast improves.
 - **Weather per training place** (e.g. home and work): each session is planned with the forecast for where you'll actually run that day.
 - **Real data**: training load (CTL/ATL/TSB, acute:chronic ratio), weekly volume, recent runs, plus every metric Dreeve's MCP server exposes (laps, zones, records…): the coach uses Dreeve's numbers instead of estimating its own.
@@ -127,7 +127,7 @@ To update: *Pull and redeploy* (no need to re-pull images, the image is built fr
 
 | Variable | Default | Description |
 |---|---|---|
-| `RADICALE_SHOPPING_URL` | — | **Full** URL of your dedicated **shopping calendar** (not the training one). `/shopping` creates **one event** there at your shopping time, with the checklist by aisle in its description, so it shows up in any calendar app. Each new list replaces the coach's previous upcoming list; your own events there are never touched. Empty = list in Telegram only. The older name `RADICALE_TASKS_URL` is still accepted |
+| `RADICALE_SHOPPING_URL` | — | **Full** URL of your dedicated **shopping calendar** (not the training one). Besides the Telegram checklist, `/shopping` creates **one event** there at your shopping time, with the checklist by aisle in its description (kept in sync as you tick items in Telegram). Each new list replaces the coach's previous upcoming list; your own events there are never touched. Empty = Telegram checklist only. The older name `RADICALE_TASKS_URL` is still accepted |
 
 ### Dreeve
 
@@ -210,15 +210,18 @@ Just talk to it (in French), for example:
 | `/memory` | Shows everything the coach knows about you, with each memory's number |
 | `/debrief` | AI debrief of your latest run (same 4 parts as the automatic one, read-only), then the check-in if not done yet |
 | `/review` | AI review of the current week: planned vs done, form, goals, next week |
-| `/shopping` | AI shopping list for the next 7 days (`/shopping 3` for 3, max 14), built from your sport and health goals, food preferences in memory, and the sessions planned over that period; also saved as an event in your shopping calendar (`RADICALE_SHOPPING_URL`) at your shopping time, e.g. *« mets-la à 15h »* |
+| `/shopping` | AI shopping list for the next 7 days (`/shopping 3` for 3, max 14), built from your sport and health goals, food preferences in memory, and the sessions planned over that period. Arrives as a Telegram checklist to tick at the store; also saved as an event in your shopping calendar (`RADICALE_SHOPPING_URL`) at your shopping time, e.g. *« mets-la à 15h »* |
+| `/list` | Shows the current shopping checklist again (no AI) |
 | `/briefing` | Runs the full briefing now: reviews everything and adjusts the plan in your calendar |
 | `/help` (or `/start`) | Lists the commands |
 
-`/plan`, `/load`, `/runs`, `/weather`, `/goals` and `/memory` answer instantly from your data, with no AI call (free). All commands appear in Telegram's `/` menu; the bot still answers in French.
+`/plan`, `/load`, `/runs`, `/weather`, `/goals`, `/memory` and `/list` answer instantly from your data, with no AI call (free). All commands appear in Telegram's `/` menu; the bot still answers in French.
 
 **Voice messages** 🎙️: send a voice note instead of typing. It is transcribed on your server (Whisper, `WHISPER_MODEL`), echoed back so you can check it, then handled like a written message. The model is downloaded on the first voice note (~500 MB for `small`, into the `coach-data` volume) and kept in memory afterwards (about 1 GB of RAM).
 
 **Goals**: just tell the coach, e.g. *« Semi de Paris le 7 mars, je vise 1h45 »* or *« je veux revenir à 72 kg »*. It stores them as structured goals (`🎯 Objectif enregistré` under its reply), plans backward from the main one, and shows the countdown in `/goals`.
+
+**Shopping checklist** 🛒: each list arrives as a Telegram message with one button per item, grouped by aisle. Tap an item when it's in the basket (☐ → ✅, with a counter); « 🧹 Tout décocher » resets it. If the list is also in your shopping calendar, each tap updates the event's description too, so the calendar shows what's left. A new list replaces the previous one (its old buttons stop working); `/list` brings the current one back.
 
 **Proposals**: when the coach suggests a calendar change without making it (debrief, weekly review, weather alert), the message ends with the proposal and buttons: ✅ applies it, ✏️ lets you say what to change, ❌ keeps the plan as is. Each button works once.
 

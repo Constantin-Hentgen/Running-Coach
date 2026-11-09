@@ -40,6 +40,7 @@ def _bot(tmp_path, monkeypatch, runs=(), asked=None, proposals=()):
     monkeypatch.setattr(bot_module.agent, "add_to_history", no_history)
     b = bot_module.CoachBot.__new__(bot_module.CoachBot)
     b.chat_id, b._activity_lock, b.sent = "42", asyncio.Lock(), []
+    b._shopping_sync_lock, b._background = asyncio.Lock(), set()
 
     async def fake_send(text, **kwargs):
         b.sent.append((text, kwargs.get("reply_markup")))
@@ -245,8 +246,18 @@ def test_weekly_adherence():
     assert "Séances prévues réalisées : 2/3 (67 %)" in text and "non faite : Fractionné (jeu 05/11)" in text
 
 
-def test_shopping_list_tool_creates_timed_event_and_reports(monkeypatch):
+ITEMS = [{"name": "Bananes", "quantity": "7", "aisle": "🥦 Fruits et légumes"},
+         {"name": "Riz", "quantity": "500 g", "aisle": "🍚 Féculents"},
+         {"name": "Pommes", "aisle": "🥦 Fruits et légumes"},
+         {"name": "  "}]   # ignoré
+
+
+def test_shopping_tool_checklist_and_calendar_event(tmp_path, monkeypatch):
+    import dataclasses
+
     from running_coach import tools
+    store = Store(tmp_path / "s.json")
+    monkeypatch.setattr(tools, "store", store)
     calls = []
 
     def fake_save(items, start, end):
@@ -254,29 +265,90 @@ def test_shopping_list_tool_creates_timed_event_and_reports(monkeypatch):
         return {"uid": "u@running-coach-shopping", "summary": "🛒", "start": start, "end": end, "replaced": 1}
 
     monkeypatch.setattr(tools.cs, "save_shopping_event", fake_save)
+
+    # Sans agenda courses : checklist seule, start_time ignoré
+    monkeypatch.setattr(tools, "settings", dataclasses.replace(tools.settings, radicale_shopping_url=None))
     ledger = tools.Ledger()
-    out = tools.tool_save_shopping_list({"start_time": "2026-11-09T15:00:00", "items": [
-        {"name": "Bananes", "quantity": "7", "aisle": "🥦 Fruits et légumes"},
-        {"name": "Riz", "quantity": "500 g"},
-        {"name": "  "},   # ignoré
-    ]}, ledger)
+    out = tools.tool_save_shopping_list({"items": ITEMS, "start_time": "2026-11-09T15:00:00"}, ledger)
+    assert out["items"] == 3 and "calendar" not in out and not calls
+    assert [i["name"] for i in store.shopping_list["items"]] == ["Bananes", "Riz", "Pommes"]
+    assert tools.build_report(ledger, False) == ""   # la checklist suit la réponse, rien à signaler
+
+    # Avec agenda courses : événement au créneau voulu, rattaché à la liste
+    monkeypatch.setattr(tools, "settings", dataclasses.replace(tools.settings, radicale_shopping_url="https://dav/shop/"))
+    ledger = tools.Ledger()
+    out = tools.tool_save_shopping_list({"items": ITEMS, "start_time": "2026-11-09T15:00:00"}, ledger)
     (items, start, end), = calls
-    assert items == [("Bananes", "7", "🥦 Fruits et légumes"), ("Riz", "500 g", None)]
     local = start.astimezone(tools.cs.TZ)
     assert (local.hour, local.minute, (end - start).seconds) == (15, 0, 1800)   # 30 min par défaut
-    assert out["ok"] and out["items"] == 2 and out["previous_list_replaced"] == 1
-    report = tools.build_report(ledger, False)
-    assert "🛒 Liste de courses enregistrée dans l'agenda courses : lun 09/11 15:00–15:30, 2 article(s)" in report
+    assert items[0] == {"name": "Bananes", "qty": "7", "aisle": "🥦 Fruits et légumes", "done": False}
+    assert store.shopping_list["event_uid"] == "u@running-coach-shopping" and out["calendar"]["previous_list_replaced"] == 1
+    assert "📅 Liste de courses ajoutée à l'agenda courses : lun 09/11 15:00–15:30" in tools.build_report(ledger, False)
+    assert [a.detail for a in ledger.actions if a.kind == "shopping"] == [str(store.shopping_list["id"])]
+
     prompt = commands.shopping_prompt(7, datetime.date(2026, 11, 9), save_to_calendar=True)
-    assert "save_shopping_list" in prompt and "save_shopping_list" not in commands.shopping_prompt(7, datetime.date(2026, 11, 9))
+    assert "save_shopping_list" in prompt and "start_time" in prompt
+    assert "start_time" not in commands.shopping_prompt(7, datetime.date(2026, 11, 9))
 
 
-def test_shopping_tool_is_offered_only_with_a_dedicated_calendar():
+def test_shopping_tool_is_always_offered_and_calendar_tool_refuses_groceries():
     from running_coach import tools
-    names = {t["name"] for t in tools.ALL_TOOLS}
-    assert ("save_shopping_list" in names) == bool(tools.settings.radicale_shopping_url)
+    assert "save_shopping_list" in {t["name"] for t in tools.ALL_TOOLS} | {t["name"] for t in tools.READ_ONLY_TOOLS}
     create = next(t for t in tools.ALL_TOOLS if t["name"] == "create_calendar_event")
     assert "Jamais pour des courses alimentaires" in create["description"]
+
+
+def test_shopping_checklist_toggle_sync_and_replacement(tmp_path, monkeypatch):
+    b, store = _bot(tmp_path, monkeypatch)
+    lst = store.set_shopping_list([{"name": "Bananes", "qty": "7", "aisle": "🥦 Fruits"}, {"name": "Riz", "aisle": "🍚 Féculents"}])
+    store.attach_shopping_event(lst["id"], "uid-courses")
+    synced = []
+    monkeypatch.setattr(bot_module.cs, "set_shopping_description", lambda uid, text: synced.append((uid, text)))
+
+    # La checklist part avec la réponse de l'agent
+    asyncio.run(b._deliver(agent.AgentReply("Voici ta liste.", shopping_list=lst["id"])))
+    text, markup = b.sent[-1]
+    assert "0/2 ✅" in text
+    assert _buttons(markup) == [("— 🥦 Fruits —", "s:n"), ("☐ Bananes — 7", f"s:t:{lst['id']}:0"),
+                                ("— 🍚 Féculents —", "s:n"), ("☐ Riz", f"s:t:{lst['id']}:1"),
+                                ("🧹 Tout décocher", f"s:r:{lst['id']}")]
+
+    async def tap(data):
+        q = FakeQuery(data)
+        update = NS(callback_query=q, effective_chat=NS(id=42), effective_message=None, message=None)
+        await b.on_button(update, None)
+        await asyncio.gather(*b._background)   # attend la recopie dans l'agenda
+        return q
+
+    q = asyncio.run(tap(f"s:t:{lst['id']}:0"))
+    new_text, new_markup = q.edits[-1]
+    assert "1/2 ✅" in new_text and ("✅ Bananes — 7", f"s:t:{lst['id']}:0") in _buttons(new_markup)
+    assert synced[-1] == ("uid-courses", "🥦 Fruits\n✅ Bananes — 7\n\n🍚 Féculents\n☐ Riz")
+
+    q = asyncio.run(tap(f"s:t:{lst['id']}:1"))
+    assert "tout est dans le panier" in q.edits[-1][0]
+    asyncio.run(tap(f"s:r:{lst['id']}"))
+    assert not any(i["done"] for i in store.shopping_list["items"]) and "☐ Bananes" in synced[-1][1]
+
+    # Une nouvelle liste remplace l'ancienne : les anciens boutons ne font plus rien
+    store.set_shopping_list([{"name": "Œufs"}])
+    q = asyncio.run(tap(f"s:t:{lst['id']}:0"))
+    assert "remplacée" in q.answers[-1] and not q.edits
+
+
+def test_list_command_shows_current_checklist(tmp_path, monkeypatch):
+    b, store = _bot(tmp_path, monkeypatch)
+    replies = []
+
+    async def reply_text(text, **kwargs):
+        replies.append((text, kwargs.get("reply_markup")))
+
+    update = NS(message=NS(reply_text=reply_text), effective_chat=NS(id=42))
+    asyncio.run(b.on_list(update, None))
+    assert "Pas de liste" in replies[-1][0]
+    store.set_shopping_list([{"name": "Œufs", "qty": "6"}])
+    asyncio.run(b.on_list(update, None))
+    assert "0/1 ✅" in replies[-1][0] and ("☐ Œufs — 6", "s:t:1:0") in _buttons(replies[-1][1])
 
 
 def test_only_the_weekly_review_uses_the_planning_model(tmp_path, monkeypatch):
