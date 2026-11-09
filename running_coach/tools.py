@@ -132,6 +132,14 @@ def tool_propose_change(args: dict, ledger: Ledger) -> dict:
     return {"ok": True, "proposal_id": pid, "note": "Des boutons Appliquer / Ajuster / Ignorer seront affichés sous ta réponse."}
 
 
+def tool_update_stock(args: dict, ledger: Ledger) -> dict:
+    r = store.update_pantry(add=args.get("add"), remove=args.get("remove"))
+    changes = [f"+{x}" for x in r["added"]] + [f"−{x}" for x in r["removed"]] + [f"{x}" for x in r["updated"]]
+    if changes:
+        ledger.record("stock", ", ".join(changes), True)
+    return {"ok": True, **r}
+
+
 def tool_save_shopping_list(args: dict, ledger: Ledger) -> dict:
     """Checklist Telegram à cocher (toujours) + événement dans l'agenda courses (si configuré et heure fournie)."""
     items = []
@@ -380,7 +388,27 @@ SHOPPING_TOOLS = [
     },
 ]
 
-_COMMON = [*MEMORY_TOOLS, *GOAL_TOOLS, PROPOSE_TOOL, *SHOPPING_TOOLS]
+STOCK_TOOL = {
+    "name": "update_stock",
+    "description": (
+        "Met à jour le stock en cuisine de l'athlète : `add` pour ce qu'il a acheté ou a déjà (même nom = remplacé), "
+        "`remove` pour ce qui est fini, jeté ou utilisé (avec qty_left s'il en reste une partie). Utilise les noms exacts "
+        "du stock du contexte. À appeler dès qu'il le dit, ou quand il confirme avoir cuisiné ou mangé ce que tu proposais."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "add": {"type": "array", "items": {"type": "object", "properties": {
+                "name": {"type": "string"}, "qty": {"type": "string", "description": "ex: « 6 », « 500 g », « 1 pot »"}},
+                "required": ["name"]}},
+            "remove": {"type": "array", "items": {"type": "object", "properties": {
+                "name": {"type": "string"}, "qty_left": {"type": "string", "description": "ce qu'il en reste, si entamé"}},
+                "required": ["name"]}},
+        },
+    },
+}
+
+_COMMON = [*MEMORY_TOOLS, *GOAL_TOOLS, PROPOSE_TOOL, *SHOPPING_TOOLS, STOCK_TOOL]
 ALL_TOOLS = [LIST_TOOL, *WRITE_TOOLS, *_COMMON]
 READ_ONLY_TOOLS = [LIST_TOOL, *_COMMON]
 
@@ -395,6 +423,7 @@ _IMPL = {
     "remove_goal": tool_remove_goal,
     "propose_change": tool_propose_change,
     "save_shopping_list": tool_save_shopping_list,
+    "update_stock": tool_update_stock,
 }
 
 
@@ -432,6 +461,8 @@ def build_report(ledger: Ledger, truncated: bool, error: str | None = None) -> s
     if memory:
         lines += [f"{_MEMORY_ICONS[a.kind]} : {md_escape(a.label)}" for a in memory]
     for a in ledger.actions:
+        if a.kind == "stock":
+            lines.append(f"🥫 Stock : {md_escape(a.label)}")
         if a.kind == "shopping_event":
             lines.append(f"📅 Liste de courses ajoutée à l'agenda courses : {md_escape(a.label)}" if a.ok
                          else f"❌ Liste de courses non ajoutée à l'agenda courses : {md_escape(a.detail)}")

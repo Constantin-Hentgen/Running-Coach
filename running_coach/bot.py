@@ -284,6 +284,15 @@ class CoachBot:
                 await self._sync_shopping_event(lst["id"])
         await self._deliver(reply, update=update)
 
+    async def on_eat(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """/eat : quoi manger maintenant (stock, heure, entraînement), questions si besoin. Haiku, sans écriture d'agenda."""
+        if not update.message or not await self._authorized(update):
+            return
+        await self._ask_and_reply(update, commands.eat_prompt(datetime.datetime.now(TZ)), allow_writes=False)
+
+    async def on_stock(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        await self._command(update, lambda: commands.format_stock_reply(store.pantry, datetime.datetime.now(TZ).date()))
+
     async def on_goals(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await self._command(update, lambda: commands.format_goals_reply(store.goals, datetime.datetime.now(TZ).date()))
 
@@ -552,7 +561,7 @@ def build_bot() -> CoachBot:
     bot = CoachBot(app)
     handlers = {
         "plan": bot.on_agenda, "load": bot.on_form, "runs": bot.on_last_runs, "weather": bot.on_weather,
-        "goals": bot.on_goals, "memory": bot.on_memory, "list": bot.on_list, "recipes": bot.on_recipes, "debrief": bot.on_debrief, "review": bot.on_review,
+        "goals": bot.on_goals, "memory": bot.on_memory, "list": bot.on_list, "recipes": bot.on_recipes, "eat": bot.on_eat, "stock": bot.on_stock, "debrief": bot.on_debrief, "review": bot.on_review,
         "shopping": bot.on_shopping, "briefing": bot.on_briefing, "help": bot.on_help,
     }
     for name, aliases, _ in commands.COMMANDS:

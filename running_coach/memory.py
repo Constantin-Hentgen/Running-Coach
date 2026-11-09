@@ -25,6 +25,7 @@ MAX_GOALS = 15
 MAX_CHECKINS = 60
 PROPOSAL_TTL_DAYS = 14
 MAX_SHOPPING_ITEMS = 60   # boutons Telegram : 100 max par message, rayons compris
+MAX_PANTRY_ITEMS = 120
 LEGS = {"fraiches": "fraîches", "normales": "normales", "lourdes": "lourdes", "douleur": "douleur"}
 
 
@@ -73,6 +74,7 @@ class Store:
         state.setdefault("checkins", {})      # id d'activité → {date, minutes, name, rpe, legs}
         state.setdefault("shopping", None)    # liste de courses en cours : {id, items, event_uid, created}
         state.setdefault("next_shopping_id", 1)
+        state.setdefault("pantry", [])        # stock en cuisine : {name, qty, added (date), source}
         # clé séance → {until, hazards, cleared} ; migre l'ancien format « rain_alerts » (clé → fin du créneau)
         alerts = state.setdefault("weather_alerts", {})
         for key, until in state.pop("rain_alerts", {}).items():
@@ -311,12 +313,19 @@ class Store:
                 self._save()
 
     def toggle_shopping_item(self, list_id, index: int) -> dict | None:
-        """Coche / décoche un article ; None si la liste a été remplacée depuis."""
+        """Coche / décoche un article ; None si la liste a été remplacée depuis.
+        Coché = acheté : l'article entre dans le stock ; décoché : il en sort."""
         with self._lock:
             lst = self._current_shopping(list_id)
             if lst is None or not 0 <= index < len(lst["items"]):
                 return None
-            lst["items"][index]["done"] = not lst["items"][index]["done"]
+            item = lst["items"][index]
+            item["done"] = not item["done"]
+            source = f"liste {lst['id']}:{index}"
+            if item["done"]:
+                self._pantry_put(item["name"], item.get("qty"), source)
+            else:
+                self.state["pantry"] = [p for p in self.state["pantry"] if p.get("source") != source]
             self._save()
         return self.shopping_list
 
@@ -327,8 +336,52 @@ class Store:
                 return None
             for item in lst["items"]:
                 item["done"] = False
+            prefix = f"liste {lst['id']}:"
+            self.state["pantry"] = [p for p in self.state["pantry"] if not (p.get("source") or "").startswith(prefix)]
             self._save()
         return self.shopping_list
+
+    # --- stock en cuisine ---------------------------------------------------------------
+
+    @property
+    def pantry(self) -> list[dict]:
+        return [dict(p) for p in self.state["pantry"]]
+
+    def _pantry_put(self, name: str, qty: str | None, source: str | None = None) -> dict:
+        """Ajoute (ou remplace, même nom) un article du stock. Appelant : verrou tenu."""
+        name = " ".join(name.split())[:80]
+        self.state["pantry"] = [p for p in self.state["pantry"] if p["name"].casefold() != name.casefold()]
+        if len(self.state["pantry"]) >= MAX_PANTRY_ITEMS:
+            raise ValueError(f"stock plein ({MAX_PANTRY_ITEMS} articles) : retire ce qui est fini d'abord")
+        item = {"name": name, "qty": (qty or "").strip()[:40] or None,
+                "added": datetime.datetime.now(TZ).date().isoformat(), "source": source}
+        self.state["pantry"].append(item)
+        return item
+
+    def update_pantry(self, add: list[dict] | None = None, remove: list[dict] | None = None) -> dict:
+        """add : [{name, qty}] (même nom = remplacé) ; remove : [{name, qty_left?}] (qty_left = il en reste).
+        Retourne {added, removed, updated, not_found}."""
+        out = {"added": [], "removed": [], "updated": [], "not_found": []}
+        with self._lock:
+            for r in remove or []:
+                name = " ".join(str(r.get("name") or "").split())
+                match = next((p for p in self.state["pantry"] if p["name"].casefold() == name.casefold()), None)
+                if match is None:
+                    out["not_found"].append(name)
+                elif r.get("qty_left"):
+                    match["qty"] = str(r["qty_left"]).strip()[:40]
+                    out["updated"].append(f"{match['name']} ({match['qty']})")
+                else:
+                    self.state["pantry"].remove(match)
+                    out["removed"].append(match["name"])
+            for a in add or []:
+                name = " ".join(str(a.get("name") or "").split())
+                if name:
+                    item = self._pantry_put(name, a.get("qty"), "conversation")
+                    out["added"].append(item["name"] + (f" ({item['qty']})" if item["qty"] else ""))
+            self._save()
+        return out
+
 
     # --- ressenti après séance --------------------------------------------------------
 

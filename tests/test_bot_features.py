@@ -477,3 +477,65 @@ def test_recipes_are_written_into_the_shopping_event(tmp_path, monkeypatch):
     (description,) = synced
     assert "☐ Poulet — 800 g" in description and "Recettes : /recipes" not in description
     assert description.endswith("🍳 RECETTES\n\n🗓️ Plan de batch cooking : dimanche, 4 boîtes\nPoulet riz curry — 4 boîtes")
+
+
+# --- Stock en cuisine et /eat ----------------------------------------------------
+
+def test_ticked_items_enter_the_stock_and_unticked_leave(tmp_path):
+    store = Store(tmp_path / "s.json")
+    lst = store.set_shopping_list([{"name": "Bananes", "qty": "7"}, {"name": "Riz", "qty": "500 g"}])
+    store.toggle_shopping_item(lst["id"], 0)
+    store.toggle_shopping_item(lst["id"], 1)
+    assert [(p["name"], p["qty"]) for p in store.pantry] == [("Bananes", "7"), ("Riz", "500 g")]
+    store.toggle_shopping_item(lst["id"], 1)          # décoché : sort du stock
+    assert [p["name"] for p in store.pantry] == ["Bananes"]
+    store.update_pantry(add=[{"name": "Œufs", "qty": "6"}])
+    store.reset_shopping(lst["id"])                   # « Tout décocher » : retire ce que la liste avait ajouté
+    assert [p["name"] for p in Store(tmp_path / "s.json").pantry] == ["Œufs"]   # persisté
+
+
+def test_update_stock_tool_add_remove_partial_and_report(tmp_path, monkeypatch):
+    from running_coach import tools
+    store = Store(tmp_path / "s.json")
+    monkeypatch.setattr(tools, "store", store)
+    store.update_pantry(add=[{"name": "Riz", "qty": "1 kg"}, {"name": "Œufs", "qty": "6"}, {"name": "Cabillaud"}])
+    ledger = tools.Ledger()
+    out = tools.tool_update_stock({"add": [{"name": "Pain"}], "remove": [
+        {"name": "cabillaud"}, {"name": "Œufs", "qty_left": "2"}, {"name": "Pâtes"}]}, ledger)
+    assert out["removed"] == ["Cabillaud"] and out["updated"] == ["Œufs (2)"] and out["not_found"] == ["Pâtes"]
+    assert {p["name"]: p["qty"] for p in store.pantry} == {"Riz": "1 kg", "Œufs": "2", "Pain": None}
+    assert "🥫 Stock : +Pain, −Cabillaud, Œufs (2)" in tools.build_report(ledger, False)
+
+
+def test_pantry_context_shows_age_and_stock_reply(tmp_path):
+    today = datetime.date(2026, 11, 9)
+    pantry = [{"name": "Cabillaud", "qty": "600 g", "added": "2026-11-06"}, {"name": "Pain", "qty": None, "added": "2026-11-09"}]
+    ctx = coaching.pantry_context(pantry, today)
+    assert ctx == "- Cabillaud (600 g) — acheté il y a 3 j\n- Pain — acheté aujourd'hui"
+    assert "vide" in coaching.pantry_context([], today)
+    reply = commands.format_stock_reply(pantry, today)
+    assert "(2 articles)" in reply and "- Cabillaud (600 g) · il y a 3 j" in reply
+    assert "Rien d'enregistré" in commands.format_stock_reply([], today)
+
+
+def test_eat_command_is_read_only_on_haiku_with_time_and_questions(tmp_path, monkeypatch):
+    b, store = _bot(tmp_path, monkeypatch)
+    calls = []
+
+    async def fake_ask(prompt, chat_id, allow_writes=True, planning=False):
+        calls.append((prompt, allow_writes, planning))
+        return agent.AgentReply("ok")
+
+    monkeypatch.setattr(bot_module.agent, "ask", fake_ask)
+
+    async def reply_text(text, **kwargs):
+        pass
+
+    update = NS(message=NS(reply_text=reply_text), effective_message=NS(reply_text=reply_text),
+                effective_chat=NS(id=42, send_action=_noop))
+    asyncio.run(b.on_eat(update, NS(args=[])))
+    (prompt, allow_writes, planning), = calls
+    assert allow_writes is False and planning is False
+    assert "Que dois-je manger maintenant ? Il est " in prompt and "stock" in prompt and "questions" in prompt
+    prompt = commands.eat_prompt(datetime.datetime(2026, 11, 9, 12, 30))
+    assert "lun 09/11 12:30" in prompt and "acheter" in prompt and "update" not in prompt.lower().replace("mettre à jour", "")

@@ -77,6 +77,28 @@ def checkins_context(checkins: list[dict]) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Stock en cuisine
+# ---------------------------------------------------------------------------
+
+def pantry_context(pantry: list[dict], today: datetime.date) -> str:
+    if not pantry:
+        return "vide ou inconnu (demande à l'athlète ce qu'il a s'il faut cuisiner)"
+    lines = []
+    for p in sorted(pantry, key=lambda p: p.get("added") or ""):
+        age = ""
+        if p.get("added"):
+            days = (today - datetime.date.fromisoformat(p["added"])).days
+            age = " — acheté aujourd'hui" if days == 0 else f" — acheté il y a {days} j"
+        lines.append(f"- {p['name']}" + (f" ({p['qty']})" if p.get("qty") else "") + age)
+    return "\n".join(lines)
+
+
+def format_pantry(pantry: list[dict], today: datetime.date) -> str:
+    """Réponse de /stock (texte brut, à échapper par l'appelant)."""
+    return pantry_context(pantry, today).replace("— acheté", "·")
+
+
+# ---------------------------------------------------------------------------
 # Bilan de la semaine : prévu (agenda) vs réalisé (Dreeve)
 # ---------------------------------------------------------------------------
 

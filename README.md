@@ -212,17 +212,21 @@ Just talk to it (in French), for example:
 | `/review` | AI review of the current week: planned vs done, form, goals, next week |
 | `/shopping` | AI shopping list for the next 7 days (`/shopping 3` for 3, max 14), built from your sport and health goals, food preferences in memory, and the sessions planned over that period. Planned around 4–6 easy meal-prep recipes. Arrives as a Telegram checklist to tick at the store, headed by **how many days and which meals it covers** and an **estimated cost range** in euros; also saved as an event in your shopping calendar (`RADICALE_SHOPPING_URL`) at your shopping time, e.g. *« mets-la à 15h »* |
 | `/list` | Shows the current shopping checklist again (no AI) |
+| `/eat` | What to eat **right now** (Haiku): deduced from your kitchen stock, the time of day and your training (session just done or coming up), goals and memory. Gives the dish and why, total time, what comes from your stock and what to buy, quantities and short steps, and how many containers to make for later. Asks one or two questions first only when it really needs to |
+| `/stock` | What you have in your kitchen (no AI), with how long ago each item was bought |
 | `/recipes` | Easy, container-friendly recipes for the current list (Haiku): a batch-cooking plan (what to cook when, how many containers) and 4–6 recipes with times, storage and steps, matched to your sessions and goals. Generated once per list, then shown again for free; `/recipes new` for different ones |
 | `/briefing` | Runs the full briefing now: reviews everything and adjusts the plan in your calendar |
 | `/help` (or `/start`) | Lists the commands |
 
-`/plan`, `/load`, `/runs`, `/weather`, `/goals`, `/memory` and `/list` answer instantly from your data, with no AI call (free). All commands appear in Telegram's `/` menu; the bot still answers in French.
+`/plan`, `/load`, `/runs`, `/weather`, `/goals`, `/memory`, `/list` and `/stock` answer instantly from your data, with no AI call (free). All commands appear in Telegram's `/` menu; the bot still answers in French.
 
 **Voice messages** 🎙️: send a voice note instead of typing. It is transcribed on your server (Whisper, `WHISPER_MODEL`), echoed back so you can check it, then handled like a written message. The model is downloaded on the first voice note (~500 MB for `small`, into the `coach-data` volume) and kept in memory afterwards (about 1 GB of RAM).
 
 **Goals**: just tell the coach, e.g. *« Semi de Paris le 7 mars, je vise 1h45 »* or *« je veux revenir à 72 kg »*. It stores them as structured goals (`🎯 Objectif enregistré` under its reply), plans backward from the main one, and shows the countdown in `/goals`.
 
 **Shopping checklist** 🛒: each list arrives as a Telegram message with one button per item, grouped by aisle, under a header showing what it covers and what it should cost (e.g. `📆 7 jours · 55–70 € estimés` / `🍽️ petits-déj, déjeuners en boîte, dîners`; the cost is the coach's estimate at typical French supermarket prices). Tap an item when it's in the basket (☐ → ✅, with a counter); « 🧹 Tout décocher » resets it. If the list is also in your shopping calendar, each tap updates the event's description too, so the calendar shows what's left. Editing the list in chat (*« enlève le poisson »*, *« ajoute des œufs »*) updates the same event at the same time slot, and once `/recipes` has run, the recipes are added below the checklist in the event. A new list replaces the previous one (its old buttons stop working); `/list` brings the current one back.
+
+**Kitchen stock** 🥫: ticking an item on the shopping checklist puts it in your stock (unticking takes it out). Just tell the coach what you buy, finish or cook (*« j'ai fini le riz »*, *« il reste 2 œufs »*, *« j'ai fait le curry »*) and it updates the stock itself (`🥫 Stock : −Riz, Œufs (2)` under its reply). The coach sees the stock and how old each item is in every message: `/shopping` doesn't re-buy what you have and uses up fresh items first, and `/eat` cooks from it.
 
 **Proposals**: when the coach suggests a calendar change without making it (debrief, weekly review, weather alert), the message ends with the proposal and buttons: ✅ applies it, ✏️ lets you say what to change, ❌ keeps the plan as is. Each button works once.
 

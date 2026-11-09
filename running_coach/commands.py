@@ -4,7 +4,7 @@ from itertools import groupby
 
 from telegram import BotCommand
 
-from .coaching import format_goals
+from .coaching import format_goals, format_pantry
 from .config import FR_DAYS
 from .dreeve import format_activity, weekly_volume
 from .formatting import md_escape
@@ -27,6 +27,8 @@ COMMANDS = [
     ("shopping", [], "Liste de courses selon tes objectifs (7 j, ou /shopping 3)"),
     ("list", [], "Ta liste de courses en cours, à cocher"),
     ("recipes", [], "Recettes en boîtes pour ta liste de courses"),
+    ("eat", [], "Quoi manger maintenant (stock, heure, entraînement)"),
+    ("stock", [], "Ce que tu as en cuisine"),
     ("briefing", [], "Briefing IA complet et ajustement du programme"),
     ("help", ["start"], "Liste des commandes"),
 ]
@@ -50,6 +52,8 @@ HELP_TEXT = """🏃 *Ton coach running*
 /shopping — liste de courses pour 7 jours selon tes objectifs sportifs et santé (/shopping 3 pour 3 jours), à cocher au magasin
 /list — réaffiche ta liste de courses en cours, à cocher
 /recipes — recettes faciles à préparer en boîtes avec ta liste (/recipes new pour en avoir d'autres)
+/eat — quoi manger maintenant, selon ton stock, l'heure et ton entraînement (temps, étapes, ce qu'il faut acheter)
+/stock — ce que tu as en cuisine (les articles cochés sur ta liste y entrent ; dis-moi ce que tu finis ou achètes)
 /briefing — briefing complet, ajuste le programme dans l'agenda
 
 /help — cette aide
@@ -66,6 +70,26 @@ def parse_days(args: list[str], default: int = AGENDA_DEFAULT_DAYS, maximum: int
     except ValueError:
         return default
     return max(1, min(days, maximum))
+
+
+def eat_prompt(now: datetime.datetime) -> str:
+    return (
+        f"Que dois-je manger maintenant ? Il est {FR_DAYS[now.weekday()]} {now:%d/%m %H:%M}.\n"
+        "Déduis-le de mon stock (contexte), de l'heure (petit-déjeuner, déjeuner, collation, dîner), de mon entraînement "
+        "(séance qui vient de se terminer ou qui arrive aujourd'hui ou demain matin, charge, ressentis), de mes objectifs et "
+        "de ma mémoire (goûts, allergies, rassasiement).\n"
+        "Si une information change vraiment la réponse et que tu ne peux pas la déduire (combien de temps j'ai, si je "
+        "mange seul, si un produit frais ancien est encore là…), pose-moi d'abord une ou deux questions courtes et "
+        "arrête-toi là. Sinon, propose directement, format Telegram concis :\n"
+        "- 🍽️ *Le plat* et pourquoi maintenant (une ligne : lien avec la séance ou l'objectif).\n"
+        "- ⏱️ Temps total (préparation + cuisson) et difficulté.\n"
+        "- 🥫 Ce qui vient du stock / 🛒 ce qu'il faut acheter (je peux acheter ce qui manque ; propose une variante "
+        "sans achat si elle est presque aussi bonne).\n"
+        "- Quantités et 3 à 6 étapes courtes.\n"
+        "- Si ça se prête aux boîtes, combien en faire pour plus tard.\n"
+        "Une seule proposition, plus éventuellement une alternative express en une ligne. Ne mets pas le stock à jour "
+        "maintenant : attends que je confirme avoir cuisiné ou mangé. Ne modifie pas l'agenda."
+    )
 
 
 def recipes_prompt(lst: dict) -> str:
@@ -89,6 +113,14 @@ def recipes_prompt(lst: dict) -> str:
     )
 
 
+def format_stock_reply(pantry: list[dict], today: datetime.date) -> str:
+    if not pantry:
+        return ("🥫 *Stock*\nRien d'enregistré. Coche les articles de ta liste de courses quand tu les achètes, ou "
+                "dis-moi ce que tu as (« j'ai du riz, des œufs et du thon »).")
+    return ("🥫 *Stock* (" + str(len(pantry)) + " articles)\n" + md_escape(format_pantry(pantry, today))
+            + "\n\n_Pour corriger : « j'ai fini le riz », « il reste 2 œufs », « j'ai acheté du pain »._")
+
+
 def format_goals_reply(goals: list[dict], today: datetime.date) -> str:
     if not goals:
         return ("🎯 *Objectifs*\nAucun objectif enregistré. Dis-moi simplement ta prochaine course (date, distance, chrono "
@@ -104,6 +136,8 @@ def shopping_prompt(days: int, today: datetime.date, save_to_calendar: bool = Fa
         "Base-toi sur : mes objectifs sportifs et de santé, mes préférences, régimes, allergies et contraintes alimentaires "
         "(mémoire) ; les séances prévues dans l'agenda sur cette période (jours durs ou longs : plus de glucides et de "
         "récupération ; jours de repos : plus léger) ; ma charge d'entraînement actuelle.\n"
+        "Tiens compte de mon stock (contexte) : n'achète pas ce que j'ai déjà en quantité suffisante, et utilise en "
+        "priorité ce qui doit être consommé vite.\n"
         "Pense la liste autour de 4 à 6 recettes faciles et efficaces à préparer à l'avance en boîtes (batch cooking : "
         "se conservent 3-4 jours au frigo, se réchauffent bien, ou se congèlent), plus petits-déjeuners et collations "
         "simples ; je demanderai les recettes avec /recipes.\n"

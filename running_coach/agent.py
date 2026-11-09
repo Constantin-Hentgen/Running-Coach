@@ -37,6 +37,11 @@ OBJECTIFS ET PÉRIODISATION :
 - Quand l'athlète annonce une course, un chrono ou un objectif santé daté, enregistre-le avec `set_goal` (pas `remember`). Si un souvenir « objectif » décrit en fait une course datée, propose de le convertir.
 - Pour les objectifs santé (poids, sommeil…), relie conseils d'entraînement et de nutrition.
 
+STOCK EN CUISINE :
+- Le contexte donne le stock (articles cochés sur la liste de courses + ce que l'athlète a signalé), avec leur ancienneté. Les produits frais anciens (poisson, viande, légumes) passent en priorité, et signale ce qui risque de ne plus être bon.
+- Dès que l'athlète dit avoir acheté, fini, jeté ou cuisiné quelque chose, mets le stock à jour avec `update_stock` (retire ce qui est fini, réduis avec qty_left ce qui a été entamé). Pas besoin de le lui demander.
+- Le stock est une estimation : sans info, ne suppose pas qu'un article frais ancien est encore là, demande.
+
 RESSENTI APRÈS SÉANCE :
 - Le contexte donne les ressentis récents (effort perçu 1-10, état des jambes). Ils pèsent autant que la charge Dreeve : effort élevé sur une séance censée être facile, jambes lourdes répétées ou douleur = signal de fatigue, allège.
 
@@ -128,6 +133,7 @@ async def _gather_context() -> str:
         f"- Date et heure actuelles : {FR_DAYS_LONG[now.weekday()]} {now:%d/%m/%Y %H:%M} ({TZ_LABEL})\n"
         f"- Objectifs (compte à rebours) :\n{coaching.goals_context(store.goals, now.date())}\n"
         f"- Ressentis après séance (14 derniers jours) :\n{coaching.checkins_context(store.recent_checkins(14, now.date()))}\n"
+        f"- Stock en cuisine :\n{coaching.pantry_context(store.pantry, now.date())}\n"
         f"- Prévisions météo :{forecast}\n"
         f"- Agenda Radicale {agenda}\n"
         f"- Dreeve :\n{dreeve_text}"
