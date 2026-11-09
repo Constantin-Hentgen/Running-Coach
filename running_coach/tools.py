@@ -140,6 +140,26 @@ def tool_update_stock(args: dict, ledger: Ledger) -> dict:
     return {"ok": True, **r}
 
 
+def tool_edit_shopping_list(args: dict, ledger: Ledger) -> dict:
+    lst, r = store.edit_shopping_list(check=args.get("check"), uncheck=args.get("uncheck"),
+                                      remove=args.get("remove"), add=args.get("add"))
+    changes = ([f"✅ {x}" for x in r["checked"]] + [f"☐ {x}" for x in r["unchecked"]]
+               + [f"−{x}" for x in r["removed"]] + [f"+{x}" for x in r["added"]])
+    ledger.record("shopping", f"{len(lst['items'])} article(s)", True, detail=str(lst["id"]))
+    if changes:
+        ledger.record("shopping_edit", ", ".join(changes), True)
+    result = {"ok": True, **r, "items": len(lst["items"]),
+              "checklist": "la checklist à jour est envoyée sous ta réponse"}
+    if lst.get("event_uid") and changes:
+        try:
+            cs.set_shopping_description(lst["event_uid"], cs.shopping_description(lst))
+        except Exception as e:
+            ledger.record("shopping_event", "agenda courses", False, str(e))
+            return {**result, "calendar": f"échec : {type(e).__name__}: {e}"}
+        result["calendar"] = "événement de l'agenda courses mis à jour"
+    return result
+
+
 def tool_save_shopping_list(args: dict, ledger: Ledger) -> dict:
     """Checklist Telegram à cocher (toujours) + événement dans l'agenda courses (si configuré et heure fournie)."""
     items = []
@@ -329,8 +349,8 @@ GOAL_TOOLS = [
 PROPOSE_TOOL = {
     "name": "propose_change",
     "description": (
-        "Enregistre un changement d'agenda que tu PROPOSES sans le faire (débrief, bilan, alerte météo, ou quand tu demandes "
-        "confirmation). L'athlète verra des boutons Appliquer / Ajuster / Ignorer : s'il clique Appliquer, ce texte te sera "
+        "Enregistre un changement de l'agenda d'ENTRAÎNEMENT que tu PROPOSES sans le faire (débrief, bilan, alerte météo, ou "
+        "quand tu demandes confirmation). Jamais pour la liste de courses ni le stock : ceux-là, fais-les directement. L'athlète verra des boutons Appliquer / Ajuster / Ignorer : s'il clique Appliquer, ce texte te sera "
         "renvoyé pour exécution, il doit donc être autonome et précis (séance, date, heure, contenu, UID si connu). "
         "Une proposition par appel ; n'en fais pas pour un simple conseil sans changement d'agenda."
     ),
@@ -346,8 +366,6 @@ _SHOPPING_CALENDAR = (
     "créneau start_time, avec la checklist par rayon dans sa description, tenue à jour quand l'athlète coche ; cela "
     "remplace la précédente liste à venir du coach, et ce que l'athlète a créé lui-même n'est jamais touché. Heure : "
     "celle demandée, sinon sa préférence en mémoire, sinon un créneau raisonnable que tu annonces."
-    + " Pour MODIFIER la liste en cours (article ajouté, retiré, quantité), rappelle l'outil avec la liste complète "
-    "corrigée : sans start_time, l'événement existant est mis à jour au même créneau."
     if settings.radicale_shopping_url else " (Aucun agenda courses n'est configuré : start_time est ignoré.)"
 )
 
@@ -357,8 +375,8 @@ SHOPPING_TOOLS = [
         "description": (
             "Enregistre la liste de courses : l'athlète la reçoit dans Telegram sous ta réponse, avec un bouton par article "
             "à cocher au magasin." + _SHOPPING_CALENDAR + " C'est le SEUL moyen d'enregistrer une liste de courses (jamais "
-            "create_calendar_event) : à appeler quand l'athlète demande une liste de courses ou de l'enregistrer / la mettre "
-            "dans l'agenda, une fois la liste finalisée. Si la liste existe déjà dans la conversation, réutilise-la telle "
+            "create_calendar_event) : à appeler pour une NOUVELLE liste, une fois finalisée. Pour modifier la liste en cours "
+            "(déjà acheté, à retirer, à ajouter), utilise edit_shopping_list. Si la liste existe déjà dans la conversation, réutilise-la telle "
             "quelle. Ne recopie pas la liste complète dans ta réponse : la checklist l'affiche déjà."
         ),
         "input_schema": {
@@ -388,6 +406,27 @@ SHOPPING_TOOLS = [
     },
 ]
 
+EDIT_SHOPPING_TOOL = {
+    "name": "edit_shopping_list",
+    "description": (
+        "Modifie la liste de courses EN COURS (visible dans le contexte) sans la recréer : `check` = articles achetés "
+        "(cochés, ils entrent dans le stock), `uncheck`, `remove` = articles à retirer de la liste, `add` = articles à "
+        "ajouter. Noms exacts de la liste. L'événement de l'agenda courses et la checklist Telegram sont mis à jour. "
+        "« J'ai déjà acheté X » → check (pas remove). À faire directement, sans proposition."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "check": {"type": "array", "items": {"type": "string"}},
+            "uncheck": {"type": "array", "items": {"type": "string"}},
+            "remove": {"type": "array", "items": {"type": "string"}},
+            "add": {"type": "array", "items": {"type": "object", "properties": {
+                "name": {"type": "string"}, "quantity": {"type": "string"}, "aisle": {"type": "string"}},
+                "required": ["name"]}},
+        },
+    },
+}
+
 STOCK_TOOL = {
     "name": "update_stock",
     "description": (
@@ -408,7 +447,7 @@ STOCK_TOOL = {
     },
 }
 
-_COMMON = [*MEMORY_TOOLS, *GOAL_TOOLS, PROPOSE_TOOL, *SHOPPING_TOOLS, STOCK_TOOL]
+_COMMON = [*MEMORY_TOOLS, *GOAL_TOOLS, PROPOSE_TOOL, *SHOPPING_TOOLS, EDIT_SHOPPING_TOOL, STOCK_TOOL]
 ALL_TOOLS = [LIST_TOOL, *WRITE_TOOLS, *_COMMON]
 READ_ONLY_TOOLS = [LIST_TOOL, *_COMMON]
 
@@ -424,6 +463,7 @@ _IMPL = {
     "propose_change": tool_propose_change,
     "save_shopping_list": tool_save_shopping_list,
     "update_stock": tool_update_stock,
+    "edit_shopping_list": tool_edit_shopping_list,
 }
 
 
@@ -463,6 +503,8 @@ def build_report(ledger: Ledger, truncated: bool, error: str | None = None) -> s
     for a in ledger.actions:
         if a.kind == "stock":
             lines.append(f"🥫 Stock : {md_escape(a.label)}")
+        if a.kind == "shopping_edit":
+            lines.append(f"✏️ Liste de courses modifiée : {md_escape(a.label)}")
         if a.kind == "shopping_event":
             lines.append(f"📅 Liste de courses ajoutée à l'agenda courses : {md_escape(a.label)}" if a.ok
                          else f"❌ Liste de courses non ajoutée à l'agenda courses : {md_escape(a.detail)}")

@@ -2,7 +2,7 @@
 résumé des ressentis après séance, bilan prévu / réalisé de la semaine."""
 import datetime
 
-from .config import FR_DAYS
+from .config import FR_DAYS, TZ
 from .dreeve import distance_km, format_activity
 from .memory import LEGS, format_goal, sorted_goals
 
@@ -73,6 +73,26 @@ def checkins_context(checkins: list[dict]) -> str:
     if rated:
         srpe = sum(c["rpe"] * (c.get("minutes") or 0) for c in rated)
         lines.append(f"Charge perçue (somme effort × minutes) sur la période : {srpe:.0f}")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Liste de courses en cours
+# ---------------------------------------------------------------------------
+
+def shopping_context(lst: dict | None) -> str:
+    if lst is None:
+        return "aucune"
+    done = sum(i["done"] for i in lst["items"])
+    meta = [f"{len(lst['items'])} articles, {done} achetés"]
+    if lst.get("days"):
+        meta.append(f"couvre {lst['days']} jours")
+    if lst.get("event_start"):
+        start = datetime.datetime.fromisoformat(lst["event_start"]).astimezone(TZ)
+        meta.append(f"dans l'agenda courses le {_day(start.date())} {start:%H:%M}")
+    lines = [f"({', '.join(meta)}) — ✅ = acheté :"]
+    lines += [f"- {'✅' if i['done'] else '☐'} {i['name']}" + (f" ({i['qty']})" if i.get("qty") else "")
+              + (f" [{i['aisle']}]" if i.get("aisle") else "") for i in lst["items"]]
     return "\n".join(lines)
 
 

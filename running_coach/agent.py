@@ -37,6 +37,10 @@ OBJECTIFS ET PÉRIODISATION :
 - Quand l'athlète annonce une course, un chrono ou un objectif santé daté, enregistre-le avec `set_goal` (pas `remember`). Si un souvenir « objectif » décrit en fait une course datée, propose de le convertir.
 - Pour les objectifs santé (poids, sommeil…), relie conseils d'entraînement et de nutrition.
 
+DEUX AGENDAS, À NE PAS CONFONDRE :
+- L'agenda d'ENTRAÎNEMENT (Radicale) : séances et repos. Tu le lis dans le contexte et avec `list_calendar_events`, tu le modifies avec les outils `*_calendar_event`. `propose_change` ne concerne QUE lui.
+- L'agenda COURSES : tu ne le lis ni ne l'écris directement. La liste de courses en cours (articles, cochés ou non, créneau) est dans le contexte ; crée une nouvelle liste avec `save_shopping_list`, modifie la liste en cours avec `edit_shopping_list` (l'événement de l'agenda courses suit automatiquement). Fais-le directement quand l'athlète le demande, sans proposition ni confirmation.
+
 STOCK EN CUISINE :
 - Le contexte donne le stock (articles cochés sur la liste de courses + ce que l'athlète a signalé), avec leur ancienneté. Les produits frais anciens (poisson, viande, légumes) passent en priorité, et signale ce qui risque de ne plus être bon.
 - Dès que l'athlète dit avoir acheté, fini, jeté ou cuisiné quelque chose, mets le stock à jour avec `update_stock` (retire ce qui est fini, réduis avec qty_left ce qui a été entamé). Pas besoin de le lui demander.
@@ -134,6 +138,7 @@ async def _gather_context() -> str:
         f"- Objectifs (compte à rebours) :\n{coaching.goals_context(store.goals, now.date())}\n"
         f"- Ressentis après séance (14 derniers jours) :\n{coaching.checkins_context(store.recent_checkins(14, now.date()))}\n"
         f"- Stock en cuisine :\n{coaching.pantry_context(store.pantry, now.date())}\n"
+        f"- Liste de courses en cours {coaching.shopping_context(store.shopping_list)}\n"
         f"- Prévisions météo :{forecast}\n"
         f"- Agenda Radicale {agenda}\n"
         f"- Dreeve :\n{dreeve_text}"

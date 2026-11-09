@@ -341,6 +341,55 @@ class Store:
             self._save()
         return self.shopping_list
 
+    def edit_shopping_list(self, check: list[str] | None = None, uncheck: list[str] | None = None,
+                           remove: list[str] | None = None, add: list[dict] | None = None) -> tuple[dict, dict]:
+        """Modifie la liste en cours sans la recréer : coche (= acheté, entre dans le stock), décoche, retire, ajoute.
+        La liste change d'id (les anciens boutons Telegram, indexés par position, ne doivent plus agir) ;
+        événement d'agenda, couverture, coût et recettes sont conservés. Retourne (liste, résumé)."""
+        out = {"checked": [], "unchecked": [], "removed": [], "added": [], "not_found": []}
+        with self._lock:
+            old = self.state["shopping"]
+            if old is None:
+                raise LookupError("aucune liste de courses en cours : crée-la avec save_shopping_list")
+            items = [dict(i, _source=f"liste {old['id']}:{n}") for n, i in enumerate(old["items"])]
+
+            def find(name):
+                name = " ".join(str(name).split()).casefold()
+                return next((i for i in items if i["name"].casefold() == name), None)
+
+            for name in remove or []:
+                if (item := find(name)) is None:
+                    out["not_found"].append(name)
+                else:
+                    items.remove(item)
+                    out["removed"].append(item["name"])
+            for a in add or []:
+                name = " ".join(str(a.get("name") or "").split())
+                if name and find(name) is None:
+                    items.append({"name": name, "qty": (a.get("qty") or a.get("quantity") or None),
+                                  "aisle": a.get("aisle") or None, "done": False, "_source": None})
+                    out["added"].append(name)
+            for names, done, key in ((check, True, "checked"), (uncheck, False, "unchecked")):
+                for name in names or []:
+                    if (item := find(name)) is None:
+                        out["not_found"].append(name)
+                    else:
+                        item["done"] = done
+                        out[key].append(item["name"])
+
+            new_id = self.state["next_shopping_id"]
+            self.state["next_shopping_id"] += 1
+            # Stock : les articles cochés y sont, sous la référence de leur nouvelle position ; les décochés en sortent.
+            stale = {i["_source"] for i in items if i["_source"]} | {f"liste {old['id']}:{n}" for n in range(len(old["items"]))}
+            self.state["pantry"] = [p for p in self.state["pantry"] if p.get("source") not in stale]
+            for n, item in enumerate(items):
+                if item["done"]:
+                    self._pantry_put(item["name"], item.get("qty"), f"liste {new_id}:{n}")
+            self.state["shopping"] = {**old, "id": new_id,
+                                      "items": [{k: v for k, v in i.items() if k != "_source"} for i in items]}
+            self._save()
+        return self.shopping_list, out
+
     # --- stock en cuisine ---------------------------------------------------------------
 
     @property

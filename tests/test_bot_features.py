@@ -539,3 +539,53 @@ def test_eat_command_is_read_only_on_haiku_with_time_and_questions(tmp_path, mon
     assert "Que dois-je manger maintenant ? Il est " in prompt and "stock" in prompt and "questions" in prompt
     prompt = commands.eat_prompt(datetime.datetime(2026, 11, 9, 12, 30))
     assert "lun 09/11 12:30" in prompt and "acheter" in prompt and "update" not in prompt.lower().replace("mettre à jour", "")
+
+
+# --- Modification de la liste en cours ------------------------------------------------
+
+def test_edit_shopping_list_checks_removes_adds_and_syncs_event(tmp_path, monkeypatch):
+    from running_coach import tools
+    store = Store(tmp_path / "s.json")
+    monkeypatch.setattr(tools, "store", store)
+    synced = []
+    monkeypatch.setattr(tools.cs, "set_shopping_description", lambda uid, text: synced.append((uid, text)))
+    lst = store.set_shopping_list([{"name": "Bananes", "qty": "7"}, {"name": "Riz"}, {"name": "Œufs", "qty": "6"},
+                                   {"name": "Thon en boîte"}], days=7)
+    store.attach_shopping_event(lst["id"], "uid-courses")
+    store.toggle_shopping_item(lst["id"], 2)          # Œufs déjà cochés (index 2)
+
+    ledger = tools.Ledger()
+    out = tools.tool_edit_shopping_list({"check": ["bananes", "Thon en boîte"], "remove": ["Riz"],
+                                         "add": [{"name": "Pain", "quantity": "1"}], "uncheck": ["Pâtes"]}, ledger)
+    new = store.shopping_list
+    assert [(i["name"], i["done"]) for i in new["items"]] == [("Bananes", True), ("Œufs", True), ("Thon en boîte", True), ("Pain", False)]
+    assert out["removed"] == ["Riz"] and out["added"] == ["Pain"] and out["not_found"] == ["Pâtes"]
+    assert new["id"] != lst["id"] and new["event_uid"] == "uid-courses" and new["days"] == 7   # même événement
+    # Stock : les articles cochés y sont, une seule fois, rattachés à leur nouvelle position
+    assert sorted((p["name"], p["source"]) for p in store.pantry) == [
+        ("Bananes", f"liste {new['id']}:0"), ("Thon en boîte", f"liste {new['id']}:2"), ("Œufs", f"liste {new['id']}:1")]
+    store.toggle_shopping_item(new["id"], 1)          # décocher Œufs dans la nouvelle checklist : sort du stock
+    assert "Œufs" not in [p["name"] for p in store.pantry]
+    assert store.toggle_shopping_item(lst["id"], 0) is None   # anciens boutons inactifs
+    # Agenda courses mis à jour, checklist renvoyée, compte-rendu
+    assert synced[-1][0] == "uid-courses" and "✅ Bananes — 7" in synced[-1][1] and "Riz" not in synced[-1][1]
+    assert [a.detail for a in ledger.actions if a.kind == "shopping"] == [str(new["id"])]
+    assert "✏️ Liste de courses modifiée : ✅ Bananes, ✅ Thon en boîte, −Riz, +Pain" in tools.build_report(ledger, False)
+
+
+def test_shopping_list_is_in_the_coach_context(tmp_path):
+    store = Store(tmp_path / "s.json")
+    assert coaching.shopping_context(None) == "aucune"
+    lst = store.set_shopping_list([{"name": "Bananes", "qty": "7", "aisle": "🥦 Fruits"}, {"name": "Riz"}], days=7)
+    start = datetime.datetime(2026, 11, 10, 18, 0, tzinfo=datetime.timezone.utc)
+    store.attach_shopping_event(lst["id"], "u", start, start + datetime.timedelta(minutes=30))
+    store.toggle_shopping_item(lst["id"], 0)
+    ctx = coaching.shopping_context(store.shopping_list)
+    assert ctx.startswith("(2 articles, 1 achetés, couvre 7 jours, dans l'agenda courses le mar 10/11 19:00)")
+    assert "- ✅ Bananes (7) [🥦 Fruits]\n- ☐ Riz" in ctx
+
+
+def test_edit_without_list_fails_cleanly(tmp_path):
+    import pytest
+    with pytest.raises(LookupError):
+        Store(tmp_path / "s.json").edit_shopping_list(check=["Riz"])
