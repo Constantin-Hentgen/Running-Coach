@@ -14,7 +14,7 @@ from . import agent, coaching, commands, dreeve, voice, weather, weather_alerts
 from . import calendar_store as cs
 from .config import TZ, settings
 from .formatting import md_escape, md_unescape, split_message
-from .memory import LEGS, store
+from .memory import LEGS, PANTRY_ASK_GRACE_DAYS, store
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +88,31 @@ def proposals_markup(proposals: list[tuple[int, str]]) -> tuple[str, InlineKeybo
     return "\n".join(lines), InlineKeyboardMarkup(rows)
 
 
+MEAL_HINT = "_Touche un plat une fois mangé ou cuisiné : ses ingrédients sortent du stock._"
+
+
+def meal_rows(meals: list[tuple[int, str]]) -> list[list[InlineKeyboardButton]]:
+    """Un bouton « mangé / cuisiné » par plat proposé (retire ses ingrédients du stock, sans IA)."""
+    return [[InlineKeyboardButton(f"✅ {title}"[:60], callback_data=f"m:{mid}")] for mid, title in meals]
+
+
+def open_meals(ids: list[int]) -> list[tuple[int, str]]:
+    """Plats encore à confirmer parmi `ids` (déjà touchés ou expirés : plus de bouton)."""
+    return [(mid, item["text"]) for mid in ids
+            if (item := store.proposal(mid)) and item.get("kind") == "meal" and item["status"] == "open"]
+
+
+def without_button(markup: InlineKeyboardMarkup | None, data: str) -> InlineKeyboardMarkup | None:
+    """Le même clavier sans la ligne du bouton `data` ; None s'il ne reste rien."""
+    rows = [list(row) for row in (markup.inline_keyboard if markup else ()) if all(b.callback_data != data for b in row)]
+    return InlineKeyboardMarkup(rows) if rows else None
+
+
+def pantry_check_markup(items: list[dict]) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton(f"✅ {p['name']}"[:40], callback_data=f"k:y:{p['id']}"),
+                                  InlineKeyboardButton("🗑️ Fini", callback_data=f"k:n:{p['id']}")] for p in items])
+
+
 def shopping_text(lst: dict) -> str:
     done = sum(i["done"] for i in lst["items"])
     total = len(lst["items"])
@@ -144,6 +169,9 @@ class CoachBot:
     async def _deliver(self, reply: agent.AgentReply, header: str = "", update: Update | None = None) -> None:
         """Réponse de l'agent + propositions (pied de message et boutons)."""
         footer, markup = proposals_markup(reply.proposals)
+        if reply.meals:
+            footer = "\n\n".join(part for part in (footer, MEAL_HINT) if part)
+            markup = InlineKeyboardMarkup([*(markup.inline_keyboard if markup else ()), *meal_rows(reply.meals)])
         text = "\n\n".join(part for part in (header, reply.text, footer) if part)
         await send_text(self._sender(update), text, markup)
         if reply.shopping_list is not None and (lst := store.shopping_list) and lst["id"] == reply.shopping_list:
@@ -268,7 +296,9 @@ class CoachBot:
             return
         regenerate = bool(context.args) and context.args[0].lower() in ("new", "nouvelles", "autres")
         if lst.get("recipes") and not regenerate:
-            await send_text(update.message.reply_text, lst["recipes"])
+            meals = open_meals(lst.get("recipe_meals") or [])
+            await send_text(update.message.reply_text, lst["recipes"] + (f"\n\n{MEAL_HINT}" if meals else ""),
+                            InlineKeyboardMarkup(meal_rows(meals)) if meals else None)
             return
         typing = asyncio.create_task(self._keep_typing(update))
         try:
@@ -279,7 +309,7 @@ class CoachBot:
         finally:
             typing.cancel()
         if not reply.text.startswith("❌"):
-            store.set_recipes(lst["id"], reply.text)
+            store.set_recipes(lst["id"], reply.text, [mid for mid, _ in reply.meals])
             if lst.get("event_uid"):   # les recettes rejoignent la checklist dans l'événement courses
                 await self._sync_shopping_event(lst["id"])
         await self._deliver(reply, update=update)
@@ -374,6 +404,10 @@ class CoachBot:
                 await self._on_checkin(update, parts[1], parts[2], parts[3])
             elif parts[0] == "s":
                 await self._on_shopping_button(update, parts)
+            elif parts[0] == "m":
+                await self._on_meal(update, parts[1])
+            elif parts[0] == "k":
+                await self._on_pantry_check(update, parts[1] == "y", parts[2])
             else:
                 await query.answer()
         except Exception:
@@ -400,6 +434,39 @@ class CoachBot:
             await agent.add_to_history(self.chat_id, f"[L'athlète a ignoré ta proposition : {item['text']}]",
                                        "D'accord, on garde le programme tel quel.")
             await self._push("👍 On garde le programme tel quel.")
+
+    async def _on_meal(self, update: Update, mid: str) -> None:
+        """Plat mangé / cuisiné : ses ingrédients sortent du stock (ou passent à ce qu'il en reste)."""
+        query = update.callback_query
+        item = store.proposal(mid)
+        if not item or item.get("kind") != "meal" or store.close_proposal(mid, "applied") is None:
+            await query.answer("Déjà noté.")
+            return
+        r = store.update_pantry(remove=item.get("uses") or [])
+        await query.answer()
+        await query.edit_message_reply_markup(without_button(query.message.reply_markup, f"m:{mid}"))
+        changes = [f"−{x}" for x in r["removed"]] + r["updated"]
+        text = f"🍽️ *{md_escape(item['text'])}* noté."
+        if changes:
+            text += f"\n🥫 Stock : {md_escape(', '.join(changes))}"
+        if r["not_found"]:
+            text += f"\n_Pas dans le stock : {md_escape(', '.join(r['not_found']))}_"
+        await self._push(text)
+        await agent.add_to_history(self.chat_id, f"[L'athlète a confirmé avoir mangé / cuisiné : {item['text']}]", md_unescape(text))
+
+    async def _on_pantry_check(self, update: Update, still_there: bool, pantry_id: str) -> None:
+        """Réponse à « Encore là ? » : la ligne de l'article disparaît du message."""
+        query = update.callback_query
+        item = store.answer_pantry_check(int(pantry_id), still_there, datetime.datetime.now(TZ).date())
+        if item is None:
+            await query.answer("Déjà retiré du stock.")
+        else:
+            await query.answer(f"{item['name']} : encore là 👍" if still_there else f"{item['name']} : retiré du stock 🗑️")
+        markup = without_button(query.message.reply_markup, f"k:y:{pantry_id}")
+        if markup is None:
+            await query.edit_message_text("🥫 Stock vérifié ✅")
+        else:
+            await query.edit_message_reply_markup(markup)
 
     async def _on_shopping_button(self, update: Update, parts: list[str]) -> None:
         query = update.callback_query
@@ -494,6 +561,30 @@ class CoachBot:
             logger.exception("Bilan hebdo en échec")
             reply = agent.AgentReply(f"❌ Bilan de la semaine impossible : {type(e).__name__}")
         await self._deliver(reply, header="📊 *Bilan de la semaine*")
+
+    async def check_pantry(self) -> None:
+        """Chaque jour : retire ce qui est resté sans réponse, puis demande « Encore là ? » pour les produits frais
+        arrivés à échéance (un bouton par article)."""
+        today = datetime.datetime.now(TZ).date()
+        try:
+            expired = store.expire_pantry(today)
+            due = store.pantry_to_check(today)[:20]
+            if not due and not expired:
+                return
+            lines = []
+            if due:
+                lines.append("🥫 *Encore là ?* Ces produits frais arrivent à échéance :")
+                lines += [f"- {md_escape(p['name'])}" + (f" ({md_escape(p['qty'])})" if p.get("qty") else "")
+                          + f" · acheté il y a {(today - datetime.date.fromisoformat(p['added'])).days} j" for p in due]
+                lines.append(f"_Sans réponse sous {PANTRY_ASK_GRACE_DAYS} j, je les retire du stock._")
+            if expired:
+                lines.append(f"🗑️ Retirés du stock (pas de réponse) : {md_escape(', '.join(expired))}")
+            text = "\n".join(lines)
+            await self._push(text, pantry_check_markup(due) if due else None)
+            store.mark_pantry_asked([p["id"] for p in due], today)
+            await agent.add_to_history(self.chat_id, "[Vérification automatique du stock envoyée par le système]", md_unescape(text))
+        except Exception:
+            logger.exception("Vérification du stock en échec")
 
     async def check_weather(self) -> None:
         """Prévient (une fois par risque et par séance) en cas de pluie, chaleur, vent ou verglas, et quand ça s'arrange."""

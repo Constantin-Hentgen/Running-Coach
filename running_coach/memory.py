@@ -26,8 +26,19 @@ MAX_CHECKINS = 60
 PROPOSAL_TTL_DAYS = 14
 MAX_SHOPPING_ITEMS = 60   # boutons Telegram : 100 max par message, rayons compris
 MAX_PANTRY_ITEMS = 120
+MAX_KEEPS_DAYS = 60       # au-delà : produit qui se garde, pas de date
+PANTRY_ASK_GRACE_DAYS = 3 # « Encore là ? » sans réponse depuis ce délai : l'article sort du stock
 LEGS = {"fraiches": "fraîches", "normales": "normales", "lourdes": "lourdes", "douleur": "douleur"}
 
+
+
+def keeps_days(value) -> int | None:
+    """Conservation d'un produit en jours : entier > 0 et raisonnable, sinon None (se garde : pas de date)."""
+    try:
+        days = int(float(value))
+    except (TypeError, ValueError):
+        return None
+    return days if 0 < days <= MAX_KEEPS_DAYS else None
 
 
 def parse_seed(raw: str | None) -> list[tuple[str, str]]:
@@ -74,7 +85,13 @@ class Store:
         state.setdefault("checkins", {})      # id d'activité → {date, minutes, name, rpe, legs}
         state.setdefault("shopping", None)    # liste de courses en cours : {id, items, event_uid, created}
         state.setdefault("next_shopping_id", 1)
-        state.setdefault("pantry", [])        # stock en cuisine : {name, qty, added (date), source}
+        # stock en cuisine : {id, name, qty, added, source, keeps (jours ou None), due (date à vérifier), asked (date)}
+        state.setdefault("pantry", [])
+        state.setdefault("next_pantry_id", 1)
+        for p in state["pantry"]:
+            if "id" not in p:
+                p["id"] = state["next_pantry_id"]
+                state["next_pantry_id"] += 1
         # clé séance → {until, hazards, cleared} ; migre l'ancien format « rain_alerts » (clé → fin du créneau)
         alerts = state.setdefault("weather_alerts", {})
         for key, until in state.pop("rain_alerts", {}).items():
@@ -235,7 +252,8 @@ class Store:
 
     # --- propositions (boutons Appliquer / Ajuster / Ignorer) -------------------------
 
-    def add_proposal(self, text: str, kind: str = "plan") -> int:
+    def add_proposal(self, text: str, kind: str = "plan", **data) -> int:
+        """kind : plan | weather | meal (data : uses = ingrédients du stock à retirer quand le plat est mangé)."""
         with self._lock:
             now = datetime.datetime.now(datetime.timezone.utc)
             cutoff = now - datetime.timedelta(days=PROPOSAL_TTL_DAYS)
@@ -243,7 +261,7 @@ class Store:
                                        if datetime.datetime.fromisoformat(v["created"]) > cutoff}
             pid = self.state["next_proposal_id"]
             self.state["next_proposal_id"] += 1
-            self.state["proposals"][str(pid)] = {"text": text, "kind": kind, "created": now.isoformat(), "status": "open"}
+            self.state["proposals"][str(pid)] = {"text": text, "kind": kind, "created": now.isoformat(), "status": "open", **data}
             self._save()
         return pid
 
@@ -276,8 +294,8 @@ class Store:
         with self._lock:
             lst = {
                 "id": self.state["next_shopping_id"],
-                "items": [{"name": i["name"], "qty": i.get("qty"), "aisle": i.get("aisle"), "done": False}
-                          for i in items[:MAX_SHOPPING_ITEMS]],
+                "items": [{"name": i["name"], "qty": i.get("qty"), "aisle": i.get("aisle"), "keeps": keeps_days(i.get("keeps")),
+                           "done": False} for i in items[:MAX_SHOPPING_ITEMS]],
                 "days": days,
                 "coverage": coverage,
                 "cost_min": cost_min,
@@ -305,11 +323,12 @@ class Store:
                 lst["event_end"] = end.isoformat() if end else None
                 self._save()
 
-    def set_recipes(self, list_id, text: str) -> None:
-        """Recettes générées pour cette liste (réaffichées sans IA par /recipes)."""
+    def set_recipes(self, list_id, text: str, meals: list[int] | None = None) -> None:
+        """Recettes générées pour cette liste (réaffichées sans IA par /recipes), avec les id de leurs boutons « cuisiné »."""
         with self._lock:
             if (lst := self._current_shopping(list_id)) is not None:
                 lst["recipes"] = text
+                lst["recipe_meals"] = list(meals or [])
                 self._save()
 
     def toggle_shopping_item(self, list_id, index: int) -> dict | None:
@@ -323,7 +342,7 @@ class Store:
             item["done"] = not item["done"]
             source = f"liste {lst['id']}:{index}"
             if item["done"]:
-                self._pantry_put(item["name"], item.get("qty"), source)
+                self._pantry_put(item["name"], item.get("qty"), source, item.get("keeps"))
             else:
                 self.state["pantry"] = [p for p in self.state["pantry"] if p.get("source") != source]
             self._save()
@@ -367,7 +386,8 @@ class Store:
                 name = " ".join(str(a.get("name") or "").split())
                 if name and find(name) is None:
                     items.append({"name": name, "qty": (a.get("qty") or a.get("quantity") or None),
-                                  "aisle": a.get("aisle") or None, "done": False, "_source": None})
+                                  "aisle": a.get("aisle") or None, "keeps": keeps_days(a.get("keeps_days") or a.get("keeps")),
+                                  "done": False, "_source": None})
                     out["added"].append(name)
             for names, done, key in ((check, True, "checked"), (uncheck, False, "unchecked")):
                 for name in names or []:
@@ -379,12 +399,20 @@ class Store:
 
             new_id = self.state["next_shopping_id"]
             self.state["next_shopping_id"] += 1
-            # Stock : les articles cochés y sont, sous la référence de leur nouvelle position ; les décochés en sortent.
-            stale = {i["_source"] for i in items if i["_source"]} | {f"liste {old['id']}:{n}" for n in range(len(old["items"]))}
-            self.state["pantry"] = [p for p in self.state["pantry"] if p.get("source") not in stale]
+            # Stock : les articles cochés y sont, sous la référence de leur nouvelle position (date d'achat conservée) ;
+            # les décochés et retirés en sortent.
+            by_source = {p.get("source"): p for p in self.state["pantry"] if p.get("source")}
+            kept = set()
             for n, item in enumerate(items):
-                if item["done"]:
-                    self._pantry_put(item["name"], item.get("qty"), f"liste {new_id}:{n}")
+                if not item["done"]:
+                    continue
+                if (entry := by_source.get(item["_source"])) is not None:
+                    entry["source"] = f"liste {new_id}:{n}"
+                    kept.add(id(entry))
+                else:
+                    kept.add(id(self._pantry_put(item["name"], item.get("qty"), f"liste {new_id}:{n}", item.get("keeps"))))
+            old_sources = {f"liste {old['id']}:{n}" for n in range(len(old["items"]))}
+            self.state["pantry"] = [p for p in self.state["pantry"] if id(p) in kept or p.get("source") not in old_sources]
             self.state["shopping"] = {**old, "id": new_id,
                                       "items": [{k: v for k, v in i.items() if k != "_source"} for i in items]}
             self._save()
@@ -396,14 +424,19 @@ class Store:
     def pantry(self) -> list[dict]:
         return [dict(p) for p in self.state["pantry"]]
 
-    def _pantry_put(self, name: str, qty: str | None, source: str | None = None) -> dict:
-        """Ajoute (ou remplace, même nom) un article du stock. Appelant : verrou tenu."""
+    def _pantry_put(self, name: str, qty: str | None, source: str | None = None, keeps: int | None = None) -> dict:
+        """Ajoute (ou remplace, même nom) un article du stock. keeps : conservation en jours (périssable), sinon None.
+        Appelant : verrou tenu."""
         name = " ".join(name.split())[:80]
         self.state["pantry"] = [p for p in self.state["pantry"] if p["name"].casefold() != name.casefold()]
         if len(self.state["pantry"]) >= MAX_PANTRY_ITEMS:
             raise ValueError(f"stock plein ({MAX_PANTRY_ITEMS} articles) : retire ce qui est fini d'abord")
-        item = {"name": name, "qty": (qty or "").strip()[:40] or None,
-                "added": datetime.datetime.now(TZ).date().isoformat(), "source": source}
+        today = datetime.datetime.now(TZ).date()
+        keeps = keeps_days(keeps)
+        item = {"id": self.state["next_pantry_id"], "name": name, "qty": (qty or "").strip()[:40] or None,
+                "added": today.isoformat(), "source": source, "keeps": keeps,
+                "due": (today + datetime.timedelta(days=keeps)).isoformat() if keeps else None, "asked": None}
+        self.state["next_pantry_id"] += 1
         self.state["pantry"].append(item)
         return item
 
@@ -426,10 +459,50 @@ class Store:
             for a in add or []:
                 name = " ".join(str(a.get("name") or "").split())
                 if name:
-                    item = self._pantry_put(name, a.get("qty"), "conversation")
+                    item = self._pantry_put(name, a.get("qty"), "conversation", a.get("keeps_days"))
                     out["added"].append(item["name"] + (f" ({item['qty']})" if item["qty"] else ""))
             self._save()
         return out
+
+    # Péremption : un article périssable arrivé à sa date (`due`) est soumis à l'athlète (« Encore là ? ») ;
+    # « encore là » repousse la date, « fini » le retire, sans réponse il sort du stock après quelques jours.
+
+    def pantry_to_check(self, today: datetime.date) -> list[dict]:
+        """Articles arrivés à leur date et pas encore soumis."""
+        return [dict(p) for p in self.state["pantry"]
+                if p.get("due") and p["due"] <= today.isoformat() and not p.get("asked")]
+
+    def mark_pantry_asked(self, ids: list[int], today: datetime.date) -> None:
+        with self._lock:
+            for p in self.state["pantry"]:
+                if p.get("id") in ids:
+                    p["asked"] = today.isoformat()
+            self._save()
+
+    def expire_pantry(self, today: datetime.date) -> list[str]:
+        """Retire les articles soumis sans réponse depuis PANTRY_ASK_GRACE_DAYS jours ; retourne leurs noms."""
+        limit = (today - datetime.timedelta(days=PANTRY_ASK_GRACE_DAYS)).isoformat()
+        with self._lock:
+            gone = [p for p in self.state["pantry"] if p.get("asked") and p["asked"] <= limit]
+            if gone:
+                self.state["pantry"] = [p for p in self.state["pantry"] if p not in gone]
+                self._save()
+        return [p["name"] for p in gone]
+
+    def answer_pantry_check(self, pantry_id: int, still_there: bool, today: datetime.date) -> dict | None:
+        """Encore là : nouvelle date dans la moitié de la conservation (au moins 1 j) ; fini : retiré.
+        None si l'article n'est plus dans le stock."""
+        with self._lock:
+            item = next((p for p in self.state["pantry"] if p.get("id") == int(pantry_id)), None)
+            if item is None:
+                return None
+            if still_there:
+                item["due"] = (today + datetime.timedelta(days=max(1, (item.get("keeps") or 2) // 2))).isoformat()
+                item["asked"] = None
+            else:
+                self.state["pantry"].remove(item)
+            self._save()
+            return dict(item)
 
 
     # --- ressenti après séance --------------------------------------------------------

@@ -61,7 +61,7 @@ def parse_locations(raw: str | None) -> list[tuple[str, float, float]]:
     return locations
 
 
-def _briefing_time(value: str | None) -> tuple[int, int] | None:
+def _briefing_time(value: str | None, name: str = "BRIEFING_TIME") -> tuple[int, int] | None:
     if not value or value.lower() in ("off", "non", "no", "none", "0"):
         return None
     try:
@@ -69,7 +69,7 @@ def _briefing_time(value: str | None) -> tuple[int, int] | None:
         datetime.time(hour, minute)
         return hour, minute
     except ValueError:
-        raise ValueError(f"BRIEFING_TIME doit être au format HH:MM ou « off » (reçu : {value!r})") from None
+        raise ValueError(f"{name} doit être au format HH:MM ou « off » (reçu : {value!r})") from None
 
 
 _DOW = {"mon": 0, "lun": 0, "tue": 1, "mar": 1, "wed": 2, "mer": 2, "thu": 3, "jeu": 3,
@@ -152,6 +152,7 @@ class Settings:
     tz: ZoneInfo
     briefing_time: tuple[int, int] | None
     weekly_review: tuple[int, int, int] | None
+    pantry_check_time: tuple[int, int] | None
     whisper_model: str | None
     activity_poll_minutes: int
     planning_horizon_days: int
@@ -197,6 +198,7 @@ class Settings:
             tz=ZoneInfo(_str("COACH_TZ") or _str("TZ") or "Europe/Paris"),
             briefing_time=_briefing_time(_str("BRIEFING_TIME", "08:00")),
             weekly_review=_weekly_time(_str("WEEKLY_REVIEW_TIME", "sun 19:00")),
+            pantry_check_time=_briefing_time(_str("PANTRY_CHECK_TIME", "18:00"), "PANTRY_CHECK_TIME"),
             whisper_model=_optional_model(_str("WHISPER_MODEL", "small")),
             activity_poll_minutes=_int("ACTIVITY_POLL_MINUTES", 1),
             planning_horizon_days=_int("PLANNING_HORIZON_DAYS", 30),
@@ -237,6 +239,7 @@ class Settings:
             logger.info(f"[CONFIG] {name} : {'activé' if ok else 'désactivé'}")
         logger.info(f"[CONFIG] modèles={self.model} (conversation) / {self.planning_model} (planification), "
                     f"fuseau={self.tz.key}, briefing={self.briefing_time}, bilan hebdo={self.weekly_review}, "
+                    f"vérification du stock={self.pantry_check_time}, "
                     f"détection runs={self.activity_poll_minutes} min")
 
 

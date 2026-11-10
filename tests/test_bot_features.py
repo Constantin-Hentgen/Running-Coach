@@ -142,8 +142,9 @@ def test_shopping_days_and_prompt():
 # --- Boutons, ressenti, objectifs, bilan ---------------------------------------
 
 class FakeQuery:
-    def __init__(self, data):
+    def __init__(self, data, markup=None):
         self.data, self.answers, self.edits = data, [], []
+        self.message = NS(reply_markup=markup)   # clavier du message touché
 
     async def answer(self, text=None, **kwargs):
         self.answers.append(text)
@@ -155,8 +156,8 @@ class FakeQuery:
         self.edits.append((text, kwargs.get("reply_markup")))
 
 
-def _click(b, data):
-    query = FakeQuery(data)
+def _click(b, data, markup=None):
+    query = FakeQuery(data, markup)
     update = NS(callback_query=query, effective_chat=NS(id=42, send_action=_noop), effective_message=None, message=None)
     asyncio.run(b.on_button(update, None))
     return query
@@ -286,7 +287,7 @@ def test_shopping_tool_checklist_and_calendar_event(tmp_path, monkeypatch):
     (items, start, end), = calls
     local = start.astimezone(tools.cs.TZ)
     assert (local.hour, local.minute, (end - start).seconds) == (15, 0, 1800)   # 30 min par défaut
-    assert items[0] == {"name": "Bananes", "qty": "7", "aisle": "🥦 Fruits et légumes", "done": False}
+    assert items[0] == {"name": "Bananes", "qty": "7", "aisle": "🥦 Fruits et légumes", "keeps": None, "done": False}
     assert store.shopping_list["event_uid"] == "u@running-coach-shopping" and out["calendar"]["previous_list_replaced"] == 1
     assert "📅 Liste de courses ajoutée à l'agenda courses : lun 09/11 15:00–15:30" in tools.build_report(ledger, False)
     assert [a.detail for a in ledger.actions if a.kind == "shopping"] == [str(store.shopping_list["id"])]
@@ -589,3 +590,150 @@ def test_edit_without_list_fails_cleanly(tmp_path):
     import pytest
     with pytest.raises(LookupError):
         Store(tmp_path / "s.json").edit_shopping_list(check=["Riz"])
+
+
+# --- Plats mangés / cuisinés et péremption du stock ------------------------------------
+
+def test_propose_meal_tool_records_a_meal_with_its_ingredients(tmp_path, monkeypatch):
+    import pytest
+    from running_coach import tools
+    store = Store(tmp_path / "s.json")
+    monkeypatch.setattr(tools, "store", store)
+    ledger = tools.Ledger()
+    out = tools.tool_propose_meal({"title": "Bowl saumon riz", "uses": [
+        {"name": "Saumon"}, {"name": "Riz", "qty_left": "700 g"}, {"name": " "}]}, ledger)
+    meal = store.proposal(out["meal_id"])
+    assert meal["kind"] == "meal" and meal["text"] == "Bowl saumon riz"
+    assert meal["uses"] == [{"name": "Saumon"}, {"name": "Riz", "qty_left": "700 g"}]
+    assert [(a.kind, a.label, a.detail) for a in ledger.actions] == [("meal", "Bowl saumon riz", str(out["meal_id"]))]
+    with pytest.raises(ValueError):
+        tools.tool_propose_meal({"title": "Rien", "uses": []}, ledger)
+    assert "propose_meal" in {t["name"] for t in tools.READ_ONLY_TOOLS}   # /eat et /recipes sont en lecture seule
+
+
+def test_meal_button_removes_ingredients_once(tmp_path, monkeypatch):
+    b, store = _bot(tmp_path, monkeypatch)
+    store.update_pantry(add=[{"name": "Saumon", "qty": "2 pavés"}, {"name": "Riz", "qty": "1 kg"}, {"name": "Pain"}])
+    mid = store.add_proposal("Bowl saumon riz", kind="meal",
+                             uses=[{"name": "saumon"}, {"name": "Riz", "qty_left": "700 g"}, {"name": "Avocat"}])
+    other = store.add_proposal("Tartines", kind="meal", uses=[{"name": "Pain"}])
+    asyncio.run(b._deliver(agent.AgentReply("Voici le plat", meals=[(mid, "Bowl saumon riz"), (other, "Tartines")])))
+    text, markup = b.sent[-1]
+    assert "Touche un plat" in text
+    assert _buttons(markup) == [("✅ Bowl saumon riz", f"m:{mid}"), ("✅ Tartines", f"m:{other}")]
+
+    q = _click(b, f"m:{mid}", markup)
+    assert {p["name"]: p["qty"] for p in store.pantry} == {"Riz": "700 g", "Pain": None}
+    assert _buttons(q.edits[-1][1]) == [("✅ Tartines", f"m:{other}")]        # seul le bouton touché disparaît
+    assert "−Saumon, Riz (700 g)" in b.sent[-1][0] and "Avocat" in b.sent[-1][0]
+    assert _click(b, f"m:{mid}").answers == ["Déjà noté."]                    # double clic sans effet
+    assert {p["name"] for p in store.pantry} == {"Riz", "Pain"}
+    assert _click(b, f"m:{other}", without := bot_module.without_button(markup, f"m:{mid}")).edits[-1] == ("markup", None)
+    assert without is not None and [p["name"] for p in store.pantry] == ["Riz"]
+
+
+def test_recipes_keep_their_cooked_buttons_when_redisplayed(tmp_path, monkeypatch):
+    b, store = _bot(tmp_path, monkeypatch)
+    lst = store.set_shopping_list([{"name": "Poulet", "keeps": 3}])
+    mid = store.add_proposal("Curry de poulet", kind="meal", uses=[{"name": "Poulet"}])
+
+    async def fake_ask(prompt, chat_id, allow_writes=True, planning=False):
+        assert "propose_meal" in prompt
+        return agent.AgentReply("🗓️ Recettes", meals=[(mid, "Curry de poulet")])
+
+    monkeypatch.setattr(bot_module.agent, "ask", fake_ask)
+    replies = []
+
+    async def reply_text(text, **kwargs):
+        replies.append((text, kwargs.get("reply_markup")))
+
+    update = NS(message=NS(reply_text=reply_text), effective_message=NS(reply_text=reply_text),
+                effective_chat=NS(id=42, send_action=_noop))
+    asyncio.run(b.on_recipes(update, NS(args=[])))
+    assert store.shopping_list["recipe_meals"] == [mid]
+    asyncio.run(b.on_recipes(update, NS(args=[])))                          # réaffichage sans IA, boutons compris
+    assert replies[-1][0].startswith("🗓️ Recettes") and _buttons(replies[-1][1]) == [("✅ Curry de poulet", f"m:{mid}")]
+    store.close_proposal(mid, "applied")
+    asyncio.run(b.on_recipes(update, NS(args=[])))
+    assert replies[-1][0].strip() == "🗓️ Recettes" and replies[-1][1] is None   # déjà cuisiné : plus de bouton
+    assert lst["id"] == store.shopping_list["id"]
+
+
+def test_fresh_items_get_a_keep_by_date_from_list_and_conversation(tmp_path, monkeypatch):
+    from running_coach import memory
+    store = Store(tmp_path / "s.json")
+    lst = store.set_shopping_list([{"name": "Cabillaud", "keeps": 2}, {"name": "Riz", "keeps": None},
+                                   {"name": "Sel", "keeps": "999"}])
+    for i in range(3):
+        store.toggle_shopping_item(lst["id"], i)
+    store.update_pantry(add=[{"name": "Salade", "keeps_days": 4}])
+    today = datetime.datetime.now(memory.TZ).date()
+    due = {p["name"]: p["due"] for p in store.pantry}
+    assert due == {"Cabillaud": (today + datetime.timedelta(days=2)).isoformat(), "Riz": None, "Sel": None,
+                   "Salade": (today + datetime.timedelta(days=4)).isoformat()}
+    assert len({p["id"] for p in store.pantry}) == 4
+    # Modifier la liste ne remet pas les dates à zéro
+    store.state["pantry"][0]["added"] = "2026-01-01"
+    store.edit_shopping_list(add=[{"name": "Pain", "keeps_days": 2}])
+    assert next(p for p in store.pantry if p["name"] == "Cabillaud")["added"] == "2026-01-01"
+    ctx = coaching.pantry_context(store.pantry, today)
+    assert "Salade — acheté aujourd'hui — se garde jusqu'au " in ctx and "- Riz — acheté aujourd'hui\n" in ctx + "\n"
+
+
+def test_old_pantry_items_get_ids_on_load(tmp_path):
+    import json
+    path = tmp_path / "s.json"
+    path.write_text(json.dumps({"pantry": [{"name": "Riz", "qty": None, "added": "2026-11-01", "source": None}]}))
+    store = Store(path)
+    assert store.pantry[0]["id"] == 1 and store.state["next_pantry_id"] == 2
+
+
+def test_daily_pantry_check_asks_then_expires(tmp_path, monkeypatch):
+    b, store = _bot(tmp_path, monkeypatch)
+    store.update_pantry(add=[{"name": "Saumon", "qty": "300 g", "keeps_days": 2}, {"name": "Brocoli", "keeps_days": 2},
+                             {"name": "Riz"}, {"name": "Yaourts", "keeps_days": 10}])
+    ids = {p["name"]: p["id"] for p in store.pantry}
+    for p in store.state["pantry"]:   # achetés il y a 3 jours
+        p["added"] = "2026-11-07"
+        p["due"] = p["due"] and ("2026-11-09" if p["keeps"] == 2 else "2026-11-17")
+
+    class Day(datetime.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime.datetime(2026, 11, 10, 18, 0, tzinfo=tz)
+
+    monkeypatch.setattr(bot_module.datetime, "datetime", Day)
+    asyncio.run(b.check_pantry())
+    text, markup = b.sent[-1]
+    assert "Encore là ?" in text and "- Saumon (300 g) · acheté il y a 3 j" in text and "Riz" not in text
+    assert _buttons(markup) == [("✅ Saumon", f"k:y:{ids['Saumon']}"), ("🗑️ Fini", f"k:n:{ids['Saumon']}"),
+                                ("✅ Brocoli", f"k:y:{ids['Brocoli']}"), ("🗑️ Fini", f"k:n:{ids['Brocoli']}")]
+    assert "à vérifier" in coaching.pantry_context(store.pantry, datetime.date(2026, 11, 10))
+    n = len(b.sent)
+    asyncio.run(b.check_pantry())                                            # déjà demandé : pas de relance
+    assert len(b.sent) == n
+
+    q = _click(b, f"k:y:{ids['Saumon']}", markup)                            # encore là : date repoussée
+    saumon = next(p for p in store.pantry if p["name"] == "Saumon")
+    assert saumon["due"] == "2026-11-11" and saumon["asked"] is None and "encore là" in q.answers[-1]
+    left = q.edits[-1][1]
+    assert _buttons(left) == [("✅ Brocoli", f"k:y:{ids['Brocoli']}"), ("🗑️ Fini", f"k:n:{ids['Brocoli']}")]
+    q = _click(b, f"k:n:{ids['Brocoli']}", left)                             # fini : retiré, message clos
+    assert "Brocoli" not in {p["name"] for p in store.pantry} and q.edits[-1] == ("🥫 Stock vérifié ✅", None)
+    assert _click(b, f"k:n:{ids['Brocoli']}").answers == ["Déjà retiré du stock."]
+
+    # Sans réponse 3 jours après la question : retiré automatiquement
+    store.mark_pantry_asked([ids["Saumon"]], datetime.date(2026, 11, 10))
+    Day.now = classmethod(lambda cls, tz=None: datetime.datetime(2026, 11, 13, 18, 0, tzinfo=tz))
+    asyncio.run(b.check_pantry())
+    assert "Retirés du stock (pas de réponse) : Saumon" in b.sent[-1][0]
+    assert {p["name"] for p in store.pantry} == {"Riz", "Yaourts"}
+
+
+def test_pantry_check_time_setting(monkeypatch):
+    from running_coach import config
+    assert config._briefing_time("18:30", "PANTRY_CHECK_TIME") == (18, 30)
+    assert config._briefing_time("off", "PANTRY_CHECK_TIME") is None
+    import pytest
+    with pytest.raises(ValueError, match="PANTRY_CHECK_TIME"):
+        config._briefing_time("soir", "PANTRY_CHECK_TIME")

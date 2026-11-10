@@ -53,14 +53,14 @@ HELP_TEXT = """🏃 *Ton coach running*
 /list — réaffiche ta liste de courses en cours, à cocher
 /recipes — recettes faciles à préparer en boîtes avec ta liste (/recipes new pour en avoir d'autres)
 /eat — quoi manger maintenant, selon ton stock, l'heure et ton entraînement (temps, étapes, ce qu'il faut acheter)
-/stock — ce que tu as en cuisine (les articles cochés sur ta liste y entrent ; dis-moi ce que tu finis ou achètes)
+/stock — ce que tu as en cuisine : les articles cochés sur ta liste y entrent, les plats que tu marques « mangé » ou « cuisiné » en sortent, et je te demande si les produits frais sont encore là quand ils arrivent à échéance
 /briefing — briefing complet, ajuste le programme dans l'agenda
 
 /help — cette aide
 
 Tu peux aussi m'envoyer des *vocaux* 🎙️. Quand je propose un changement, des boutons te permettent de l'appliquer.
 
-_Automatique : débrief et ressenti après chaque run, briefing chaque matin, bilan le dimanche soir, alerte météo (pluie, chaleur, vent, verglas) sur tes séances._"""
+_Automatique : débrief et ressenti après chaque run, briefing chaque matin, bilan le dimanche soir, alerte météo (pluie, chaleur, vent, verglas) sur tes séances, « encore là ? » sur les produits frais du stock._"""
 
 
 def parse_days(args: list[str], default: int = AGENDA_DEFAULT_DAYS, maximum: int = AGENDA_MAX_DAYS) -> int:
@@ -87,8 +87,9 @@ def eat_prompt(now: datetime.datetime) -> str:
         "sans achat si elle est presque aussi bonne).\n"
         "- Quantités et 3 à 6 étapes courtes.\n"
         "- Si ça se prête aux boîtes, combien en faire pour plus tard.\n"
-        "Une seule proposition, plus éventuellement une alternative express en une ligne. Ne mets pas le stock à jour "
-        "maintenant : attends que je confirme avoir cuisiné ou mangé. Ne modifie pas l'agenda."
+        "Une seule proposition, plus éventuellement une alternative express en une ligne. Appelle propose_meal pour le "
+        "plat (et pour l'alternative) avec les ingrédients du stock qu'il consomme : j'aurai un bouton pour dire que je "
+        "l'ai mangé, et c'est lui qui retirera ces ingrédients du stock. Ne modifie pas l'agenda."
     )
 
 
@@ -109,6 +110,8 @@ def recipes_prompt(lst: dict) -> str:
         "liste avec quantités, 3 à 5 étapes courtes, et pour quel moment (déjeuner, dîner, après telle séance).\n"
         "- 🥣 Petits-déjeuners et collations rapides : 2-3 lignes.\n"
         "- Une ligne pour un article de la liste non utilisé ou un ingrédient qui manquerait.\n"
+        "Pour chaque recette, appelle propose_meal (titre = nom de la recette, uses = articles de la liste ou du stock "
+        "qu'elle consomme) : j'aurai un bouton « cuisiné » qui les retirera du stock.\n"
         "Ne modifie pas l'agenda et n'appelle pas save_shopping_list."
     )
 

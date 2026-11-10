@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class Action:
-    kind: str       # create | update | delete | remember | forget | goal | goal_remove | proposal | shopping | shopping_event
+    kind: str       # create | update | delete | remember | forget | goal | goal_remove | proposal | meal | shopping | shopping_event
     label: str
     ok: bool
     detail: str = ""
@@ -140,6 +140,24 @@ def tool_update_stock(args: dict, ledger: Ledger) -> dict:
     return {"ok": True, **r}
 
 
+def tool_propose_meal(args: dict, ledger: Ledger) -> dict:
+    title = " ".join((args.get("title") or "").split())[:80]
+    if not title:
+        raise ValueError("titre vide")
+    uses = []
+    for u in args.get("uses") or []:
+        name = " ".join(str(u.get("name") or "").split())
+        if name:
+            left = " ".join(str(u.get("qty_left") or "").split())[:40]
+            uses.append({"name": name, **({"qty_left": left} if left else {})})
+    if not uses:
+        raise ValueError("aucun ingrédient du stock : pas de bouton pour ce plat")
+    pid = store.add_proposal(title, kind="meal", uses=uses)
+    ledger.record("meal", title, True, detail=str(pid))
+    return {"ok": True, "meal_id": pid,
+            "note": "Un bouton « mangé / cuisiné » est affiché sous ta réponse ; ne mets pas le stock à jour toi-même."}
+
+
 def tool_edit_shopping_list(args: dict, ledger: Ledger) -> dict:
     lst, r = store.edit_shopping_list(check=args.get("check"), uncheck=args.get("uncheck"),
                                       remove=args.get("remove"), add=args.get("add"))
@@ -168,7 +186,8 @@ def tool_save_shopping_list(args: dict, ledger: Ledger) -> dict:
         if not name:
             continue
         qty = " ".join(str(it.get("quantity") or "").split()) or None
-        items.append({"name": name, "qty": qty, "aisle": (it.get("aisle") or "").strip() or None})
+        items.append({"name": name, "qty": qty, "aisle": (it.get("aisle") or "").strip() or None,
+                      "keeps": it.get("keeps_days")})
     if not items:
         raise ValueError("liste vide")
     def number(key):
@@ -361,6 +380,12 @@ PROPOSE_TOOL = {
     },
 }
 
+_KEEPS_DESC = (
+    "Produits périssables seulement : combien de jours il se garde une fois acheté (poisson frais 2, viande 3, pain 2, "
+    "salade 4, légumes 5-7, fruits 5-7, yaourts et fromage frais 10, œufs 21). Omettre pour ce qui se garde (épicerie "
+    "sèche, conserves, surgelés, condiments) : l'athlète recevra « Encore là ? » à cette échéance."
+)
+
 _SHOPPING_CALENDAR = (
     " Elle est aussi enregistrée comme UN ÉVÉNEMENT dans l'agenda COURSES dédié (séparé de l'agenda d'entraînement) au "
     "créneau start_time, avec la checklist par rayon dans sa description, tenue à jour quand l'athlète coche ; cela "
@@ -396,6 +421,7 @@ SHOPPING_TOOLS = [
                             "name": {"type": "string", "description": "ex: « Bananes »"},
                             "quantity": {"type": "string", "description": "ex: « 6 », « 500 g »"},
                             "aisle": {"type": "string", "description": "rayon avec émoji, ex: « 🥦 Fruits et légumes »"},
+                            "keeps_days": {"type": "integer", "description": _KEEPS_DESC},
                         },
                         "required": ["name"],
                     },
@@ -421,7 +447,8 @@ EDIT_SHOPPING_TOOL = {
             "uncheck": {"type": "array", "items": {"type": "string"}},
             "remove": {"type": "array", "items": {"type": "string"}},
             "add": {"type": "array", "items": {"type": "object", "properties": {
-                "name": {"type": "string"}, "quantity": {"type": "string"}, "aisle": {"type": "string"}},
+                "name": {"type": "string"}, "quantity": {"type": "string"}, "aisle": {"type": "string"},
+                "keeps_days": {"type": "integer", "description": _KEEPS_DESC}},
                 "required": ["name"]}},
         },
     },
@@ -438,7 +465,8 @@ STOCK_TOOL = {
         "type": "object",
         "properties": {
             "add": {"type": "array", "items": {"type": "object", "properties": {
-                "name": {"type": "string"}, "qty": {"type": "string", "description": "ex: « 6 », « 500 g », « 1 pot »"}},
+                "name": {"type": "string"}, "qty": {"type": "string", "description": "ex: « 6 », « 500 g », « 1 pot »"},
+                "keeps_days": {"type": "integer", "description": _KEEPS_DESC}},
                 "required": ["name"]}},
             "remove": {"type": "array", "items": {"type": "object", "properties": {
                 "name": {"type": "string"}, "qty_left": {"type": "string", "description": "ce qu'il en reste, si entamé"}},
@@ -447,7 +475,29 @@ STOCK_TOOL = {
     },
 }
 
-_COMMON = [*MEMORY_TOOLS, *GOAL_TOOLS, PROPOSE_TOOL, *SHOPPING_TOOLS, EDIT_SHOPPING_TOOL, STOCK_TOOL]
+MEAL_TOOL = {
+    "name": "propose_meal",
+    "description": (
+        "À appeler pour CHAQUE plat ou recette que tu proposes de manger ou de cuisiner (/eat, /recipes, ou en "
+        "conversation) : l'athlète aura un bouton « mangé / cuisiné » qui retirera alors ces ingrédients du stock. "
+        "`uses` = les articles du stock (ou de la liste de courses en cours) que le plat consomme, noms exacts ; "
+        "qty_left = ce qu'il en restera s'il n'est pas fini. Pas les basiques du placard (sel, huile, épices) sauf "
+        "s'ils sont finis. Ne mets pas le stock à jour toi-même pour ce plat."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string", "description": "nom court du plat, ex: « Bowl saumon riz »"},
+            "uses": {"type": "array", "items": {"type": "object", "properties": {
+                "name": {"type": "string"},
+                "qty_left": {"type": "string", "description": "ce qu'il en restera, ex: « 300 g » ; omettre si fini"}},
+                "required": ["name"]}},
+        },
+        "required": ["title", "uses"],
+    },
+}
+
+_COMMON = [*MEMORY_TOOLS, *GOAL_TOOLS, PROPOSE_TOOL, *SHOPPING_TOOLS, EDIT_SHOPPING_TOOL, STOCK_TOOL, MEAL_TOOL]
 ALL_TOOLS = [LIST_TOOL, *WRITE_TOOLS, *_COMMON]
 READ_ONLY_TOOLS = [LIST_TOOL, *_COMMON]
 
@@ -464,6 +514,7 @@ _IMPL = {
     "save_shopping_list": tool_save_shopping_list,
     "update_stock": tool_update_stock,
     "edit_shopping_list": tool_edit_shopping_list,
+    "propose_meal": tool_propose_meal,
 }
 
 

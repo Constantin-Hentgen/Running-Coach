@@ -75,6 +75,10 @@ async def lifespan(_: FastAPI):
                 dow, hour, minute = settings.weekly_review
                 scheduler.add_job(bot.weekly_review, "cron", day_of_week=dow, hour=hour, minute=minute,
                                   misfire_grace_time=3600, coalesce=True)
+            if settings.pantry_check_time:
+                hour, minute = settings.pantry_check_time
+                scheduler.add_job(bot.check_pantry, "cron", hour=hour, minute=minute,
+                                  misfire_grace_time=3600, coalesce=True)
             if settings.weather_enabled and settings.radicale_url and settings.rain_check_minutes > 0:
                 scheduler.add_job(bot.check_weather, "interval", minutes=settings.rain_check_minutes, coalesce=True,
                                   next_run_time=datetime.datetime.now(settings.tz) + datetime.timedelta(minutes=1))

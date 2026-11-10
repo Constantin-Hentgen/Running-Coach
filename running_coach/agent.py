@@ -42,8 +42,9 @@ DEUX AGENDAS, À NE PAS CONFONDRE :
 - L'agenda COURSES : tu ne le lis ni ne l'écris directement. La liste de courses en cours (articles, cochés ou non, créneau) est dans le contexte ; crée une nouvelle liste avec `save_shopping_list`, modifie la liste en cours avec `edit_shopping_list` (l'événement de l'agenda courses suit automatiquement). Fais-le directement quand l'athlète le demande, sans proposition ni confirmation.
 
 STOCK EN CUISINE :
-- Le contexte donne le stock (articles cochés sur la liste de courses + ce que l'athlète a signalé), avec leur ancienneté. Les produits frais anciens (poisson, viande, légumes) passent en priorité, et signale ce qui risque de ne plus être bon.
-- Dès que l'athlète dit avoir acheté, fini, jeté ou cuisiné quelque chose, mets le stock à jour avec `update_stock` (retire ce qui est fini, réduis avec qty_left ce qui a été entamé). Pas besoin de le lui demander.
+- Le contexte donne le stock (articles cochés sur la liste de courses + ce que l'athlète a signalé), avec leur ancienneté et, pour les produits frais, la date jusqu'à laquelle ils se gardent. Ce qui arrive à échéance passe en priorité, et signale ce qui risque de ne plus être bon.
+- Chaque plat ou recette que tu proposes : appelle `propose_meal` avec les ingrédients du stock qu'il consomme. L'athlète confirme d'un bouton et le système retire lui-même ces ingrédients : ne le fais pas toi-même.
+- Dès que l'athlète dit avoir acheté, fini, jeté ou cuisiné autre chose, mets le stock à jour avec `update_stock` (retire ce qui est fini, réduis avec qty_left ce qui a été entamé, `keeps_days` pour un produit frais ajouté). Pas besoin de le lui demander.
 - Le stock est une estimation : sans info, ne suppose pas qu'un article frais ancien est encore là, demande.
 
 RESSENTI APRÈS SÉANCE :
@@ -96,10 +97,12 @@ _lock = asyncio.Lock()   # une seule exécution à la fois : pas d'écritures co
 @dataclass
 class AgentReply:
     """Texte à envoyer (compte-rendu inclus) + propositions enregistrées pendant le run [(id, texte)]
-    + id de la liste de courses créée pendant le run (checklist à envoyer)."""
+    + id de la liste de courses créée pendant le run (checklist à envoyer) + plats proposés [(id, titre)]
+    (bouton « mangé / cuisiné »)."""
     text: str
     proposals: list[tuple[int, str]] = field(default_factory=list)
     shopping_list: int | None = None
+    meals: list[tuple[int, str]] = field(default_factory=list)
 
 
 def _system_blocks() -> list[dict]:
@@ -248,4 +251,5 @@ async def ask(user_prompt: str, chat_id: str = "default", allow_writes: bool = T
         logger.info(f"Agent terminé ({model}) : {ledger.ok_count}/{len(ledger)} action(s) réussie(s), "
                     f"{len(proposals)} proposition(s), truncated={truncated}, error={error}")
         shopping = next((int(a.detail) for a in reversed(ledger.actions) if a.kind == "shopping" and a.ok), None)
-        return AgentReply(final_text, proposals, shopping)
+        meals = [(int(a.detail), a.label) for a in ledger.actions if a.kind == "meal"]
+        return AgentReply(final_text, proposals, shopping, meals)

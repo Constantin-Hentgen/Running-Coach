@@ -109,8 +109,19 @@ def pantry_context(pantry: list[dict], today: datetime.date) -> str:
         if p.get("added"):
             days = (today - datetime.date.fromisoformat(p["added"])).days
             age = " — acheté aujourd'hui" if days == 0 else f" — acheté il y a {days} j"
-        lines.append(f"- {p['name']}" + (f" ({p['qty']})" if p.get("qty") else "") + age)
+        lines.append(f"- {p['name']}" + (f" ({p['qty']})" if p.get("qty") else "") + age + _due_label(p, today))
     return "\n".join(lines)
+
+
+def _due_label(p: dict, today: datetime.date) -> str:
+    if not p.get("due"):
+        return ""
+    due = datetime.date.fromisoformat(p["due"])
+    if p.get("asked"):
+        return " — à vérifier (« encore là ? » envoyé)"
+    if due < today:
+        return " — date dépassée"
+    return " — à consommer aujourd'hui" if due == today else f" — se garde jusqu'au {_day(due)}"
 
 
 def format_pantry(pantry: list[dict], today: datetime.date) -> str:
