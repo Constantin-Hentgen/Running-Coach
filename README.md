@@ -172,6 +172,7 @@ The `RAIN_ALERT_*` variables keep their historical names but drive all weather a
 | `COACH_TZ` | `Europe/Paris` | Time zone |
 | `BRIEFING_TIME` | `08:00` | Briefing time; `off` = disabled |
 | `WEEKLY_REVIEW_TIME` | `sun 19:00` | Weekly review day (`mon`…`sun`) and time; `off` = disabled (`/review` still works) |
+| `MEAL_CHECK_TIMES` | `10:30,14:30,21:30` | When to ask « Qu'as-tu mangé ? » (about an hour after each meal), only if no meal was logged since the previous question (5 h at most); `off` = never |
 | `PANTRY_CHECK_TIME` | `18:00` | Daily « Encore là ? » check on fresh stock items that reached their keep-by date; `off` = disabled |
 | `WHISPER_MODEL` | `small` | Whisper model for voice notes: `tiny`, `base`, `small`, `medium` (bigger = more accurate, slower, more RAM); `off` = voice disabled |
 | `ACTIVITY_POLL_MINUTES` | `1` | New-run detection interval; `0` = disabled |
@@ -232,6 +233,7 @@ Just talk to it (in French), for example:
 Most of it needs no typing:
 - **Eaten / cooked buttons**: each dish `/eat` suggests and each recipe from `/recipes` comes with a button (`✅ Bowl saumon riz`). Tap it once you've eaten or cooked it and its ingredients leave the stock (or are reduced to what's left), with no AI call.
 - **Keep-by dates**: the coach gives each fresh item a shelf life when it goes on the list or into the stock (fish 2 days, vegetables about a week, dry goods none). Every day at `PANTRY_CHECK_TIME`, items that reached it come in one message with **Encore là / Fini** buttons per item; « encore là » pushes the date back by half the shelf life. Items you don't answer about within 3 days leave the stock on their own.
+- **Food log** 🍽️: tapping a dish's button logs it as eaten (a `/recipes` « cuisiné » button instead puts the boxes in the stock). When no meal is logged around a meal time (`MEAL_CHECK_TIMES`), the bot asks « Qu'as-tu mangé au déjeuner ? » with **Sauté / Passer** buttons. Answer in text or voice: the coach logs the meal with rough kcal / protein / carbs estimates, takes what you used out of the stock, and says in a few lines whether the day's food fits your training (session done or coming, load, goals) and what to eat next. You can also just tell it what you ate at any time. Today's and yesterday's meals are in the coach's context, so `/eat` and the briefing take them into account.
 
 **Proposals**: when the coach suggests a calendar change without making it (debrief, weekly review, weather alert), the message ends with the proposal and buttons: ✅ applies it, ✏️ lets you say what to change, ❌ keeps the plan as is. Each button works once.
 

@@ -737,3 +737,95 @@ def test_pantry_check_time_setting(monkeypatch):
     import pytest
     with pytest.raises(ValueError, match="PANTRY_CHECK_TIME"):
         config._briefing_time("soir", "PANTRY_CHECK_TIME")
+
+
+# --- Journal alimentaire et « qu'as-tu mangé ? » -------------------------------------
+
+def test_meal_windows_and_slots():
+    times = [(10, 30), (14, 30), (21, 30)]
+    assert coaching.meal_window(times, 0) == (datetime.time(5, 30), datetime.time(10, 30), "petit-déjeuner")
+    assert coaching.meal_window(times, 1) == (datetime.time(10, 30), datetime.time(14, 30), "déjeuner")
+    assert coaching.meal_window(times, 2) == (datetime.time(16, 30), datetime.time(21, 30), "dîner")   # 5 h max
+    meals = [{"date": "2026-11-11", "time": "16:00"}]
+    day = datetime.date(2026, 11, 11)
+    assert not coaching.has_meal_between(meals, day, datetime.time(16, 30), datetime.time(21, 30))   # collation
+    assert coaching.has_meal_between(meals, day, datetime.time(10, 30), datetime.time(16, 0))
+    from running_coach import config
+    assert config._meal_times("21:30, 10:30") == [(10, 30), (21, 30)] and config._meal_times("off") == []
+
+
+def test_log_meal_tool_logs_updates_stock_and_reports(tmp_path, monkeypatch):
+    import pytest
+    from running_coach import tools
+    store = Store(tmp_path / "s.json")
+    monkeypatch.setattr(tools, "store", store)
+    store.update_pantry(add=[{"name": "Curry de poulet", "qty": "4 boîtes"}, {"name": "Pommes", "qty": "6"}])
+    ledger = tools.Ledger()
+    out = tools.tool_log_meal({"description": "Curry de poulet (1 boîte) + pomme", "time": "2026-11-10T12:45:00",
+                               "kcal": 720, "protein_g": "42", "carbs_g": 85.4,
+                               "uses": [{"name": "Curry de poulet", "qty_left": "3 boîtes"}, {"name": "Pommes", "qty_left": "5"}]}, ledger)
+    assert out["logged"]["time"] == "12:45" and out["logged"]["protein_g"] == 42 and out["logged"]["carbs_g"] == 85
+    assert {p["name"]: p["qty"] for p in store.pantry} == {"Curry de poulet": "3 boîtes", "Pommes": "5"}
+    report = tools.build_report(ledger, False)
+    assert "🍽️ Repas noté : 12:45 Curry de poulet" in report and "🥫 Stock : Curry de poulet (3 boîtes), Pommes (5)" in report
+    with pytest.raises(ValueError):
+        tools.tool_log_meal({"description": "Dîner", "time": "2099-01-01T20:00:00"}, ledger)
+    store.log_meal("Porridge banane", datetime.datetime(2026, 11, 11, 7, 30, tzinfo=tools.cs.TZ), kcal=450, protein_g=15)
+    ctx = coaching.meals_context(store.meals_since(datetime.date(2026, 11, 10)), datetime.date(2026, 11, 11))
+    assert "hier (mar 10/11) :\n- 12:45 Curry de poulet (1 boîte) + pomme (~720 kcal, P 42 g, G 85 g)" in ctx
+    assert "aujourd'hui (mer 11/11) :\n- 07:30 Porridge banane (~450 kcal, P 15 g)\n  total estimé : ~450 kcal, P 15 g" in ctx
+    assert {"log_meal", "propose_meal"} <= {t["name"] for t in tools.READ_ONLY_TOOLS}
+
+
+def test_eaten_button_logs_the_meal_and_cooked_button_stocks_boxes(tmp_path, monkeypatch):
+    b, store = _bot(tmp_path, monkeypatch)
+    store.update_pantry(add=[{"name": "Saumon"}, {"name": "Poulet"}, {"name": "Riz", "qty": "1 kg"}])
+    eaten = store.add_proposal("Bowl saumon", kind="meal", uses=[{"name": "Saumon"}], makes=None,
+                               macros={"kcal": 650, "protein_g": 40, "carbs_g": None})
+    cooked = store.add_proposal("Curry de poulet", kind="meal", uses=[{"name": "Poulet"}, {"name": "Riz", "qty_left": "600 g"}],
+                                makes="4 boîtes", macros={})
+    _click(b, f"m:{eaten}")
+    (meal,) = store.meals_since(datetime.date(2020, 1, 1))
+    assert meal["text"] == "Bowl saumon" and meal["kcal"] == 650 and meal["source"] == "bouton"
+    _click(b, f"m:{cooked}")
+    assert "cuisiné" in b.sent[-1][0] and "+Curry de poulet (4 boîtes)" in b.sent[-1][0]
+    assert {p["name"]: p["qty"] for p in store.pantry} == {"Riz": "600 g", "Curry de poulet": "4 boîtes"}
+    assert len(store.meals_since(datetime.date(2020, 1, 1))) == 1                # cuisiné ≠ mangé
+
+
+def _at(monkeypatch, hour, minute, day=11):
+    class Now(datetime.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime.datetime(2026, 11, day, hour, minute, tzinfo=tz)
+    monkeypatch.setattr(bot_module.datetime, "datetime", Now)
+
+
+def test_meal_question_only_without_any_trace_and_once(tmp_path, monkeypatch):
+    b, store = _bot(tmp_path, monkeypatch)
+    import dataclasses
+    monkeypatch.setattr(bot_module, "settings",
+                        dataclasses.replace(bot_module.settings, meal_check_times=[(10, 30), (14, 30), (21, 30)]))
+    tz = bot_module.TZ
+    store.log_meal("Porridge", datetime.datetime(2026, 11, 11, 7, 45, tzinfo=tz))
+    _at(monkeypatch, 10, 30)
+    asyncio.run(b.check_meal(0))                                             # petit-déj noté : pas de question
+    assert not b.sent
+
+    _at(monkeypatch, 14, 30)
+    asyncio.run(b.check_meal(1))
+    text, markup = b.sent[-1]
+    assert "Qu'as-tu mangé au déjeuner ?" in text and "entraînement" in text
+    assert _buttons(markup) == [("🙅 Sauté", "q:s:2026-11-11:1"), ("⏭️ Passer", "q:x:2026-11-11:1")]
+    asyncio.run(b.check_meal(1))                                             # déjà posée : pas deux fois
+    assert len(b.sent) == 1
+
+    _click(b, "q:s:2026-11-11:1")                                            # sauté : noté à la fin de la plage
+    skipped = store.meals_since(datetime.date(2026, 11, 11))[-1]
+    assert (skipped["time"], skipped["text"], skipped["kcal"]) == ("14:30", "rien (déjeuner sauté)", 0)
+    assert "déjeuner sauté" in b.sent[-1][0]
+    _at(monkeypatch, 21, 30)                                                 # le « sauté » n'efface pas le dîner
+    asyncio.run(b.check_meal(2))
+    assert "au dîner" in b.sent[-1][0]
+    _click(b, "q:x:2026-11-11:2")
+    assert store.meal_check("2026-11-11 dîner") == "skipped" and "on passe" in b.sent[-1][0]

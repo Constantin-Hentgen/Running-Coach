@@ -406,6 +406,8 @@ class CoachBot:
                 await self._on_shopping_button(update, parts)
             elif parts[0] == "m":
                 await self._on_meal(update, parts[1])
+            elif parts[0] == "q":
+                await self._on_meal_question(update, parts[1], parts[2], int(parts[3]))
             elif parts[0] == "k":
                 await self._on_pantry_check(update, parts[1] == "y", parts[2])
             else:
@@ -446,13 +448,38 @@ class CoachBot:
         await query.answer()
         await query.edit_message_reply_markup(without_button(query.message.reply_markup, f"m:{mid}"))
         changes = [f"−{x}" for x in r["removed"]] + r["updated"]
-        text = f"🍽️ *{md_escape(item['text'])}* noté."
+        if item.get("makes"):   # batch cooking : les boîtes entrent au stock, rien n'est encore mangé
+            store.update_pantry(add=[{"name": item["text"], "qty": item["makes"], "keeps_days": 4}])
+            changes.append(f"+{item['text']} ({item['makes']})")
+            text = f"🍳 *{md_escape(item['text'])}* cuisiné."
+        else:                   # mangé : entre dans le journal alimentaire
+            macros = item.get("macros") or {}
+            store.log_meal(item["text"], datetime.datetime.now(TZ), source="bouton", **macros)
+            text = f"🍽️ *{md_escape(item['text'])}* noté."
         if changes:
             text += f"\n🥫 Stock : {md_escape(', '.join(changes))}"
         if r["not_found"]:
             text += f"\n_Pas dans le stock : {md_escape(', '.join(r['not_found']))}_"
         await self._push(text)
         await agent.add_to_history(self.chat_id, f"[L'athlète a confirmé avoir mangé / cuisiné : {item['text']}]", md_unescape(text))
+
+    async def _on_meal_question(self, update: Update, action: str, day: str, index: int) -> None:
+        """« Qu'as-tu mangé ? » : Sauté (noté comme repas vide, à la fin de sa plage) ou Passer (on n'en parle plus)."""
+        query = update.callback_query
+        await query.answer()
+        _, end, slot = coaching.meal_window(settings.meal_check_times, index)
+        key = f"{day} {slot}"
+        if action == "s":
+            at = datetime.datetime.combine(datetime.date.fromisoformat(day), end, tzinfo=TZ)
+            store.log_meal(f"rien ({slot} sauté)", at, source="bouton", kcal=0, protein_g=0, carbs_g=0)
+            store.set_meal_check(key, "answered")
+            text = f"🙅 Noté : {slot} sauté."
+        else:
+            store.set_meal_check(key, "skipped")
+            text = "⏭️ D'accord, on passe."
+        await query.edit_message_reply_markup(None)
+        await self._push(text)
+        await agent.add_to_history(self.chat_id, f"[Réponse à « qu'as-tu mangé ? » ({slot})]", text)
 
     async def _on_pantry_check(self, update: Update, still_there: bool, pantry_id: str) -> None:
         """Réponse à « Encore là ? » : la ligne de l'article disparaît du message."""
@@ -585,6 +612,28 @@ class CoachBot:
             await agent.add_to_history(self.chat_id, "[Vérification automatique du stock envoyée par le système]", md_unescape(text))
         except Exception:
             logger.exception("Vérification du stock en échec")
+
+    async def check_meal(self, index: int) -> None:
+        """Après un repas (MEAL_CHECK_TIMES) : sans aucune trace de ce repas (bouton « mangé », repas dit au coach),
+        demande ce qui a été mangé. La réponse, libre, passe par le coach : journal, stock, avis nutrition."""
+        now = datetime.datetime.now(TZ)
+        start, end, slot = coaching.meal_window(settings.meal_check_times, index)
+        key = f"{now.date().isoformat()} {slot}"
+        try:
+            if store.meal_check(key) or coaching.has_meal_between(store.meals_since(now.date()), now.date(), start, end):
+                return
+            text = (f"🍽️ *Qu'as-tu mangé {coaching.MEAL_SLOT_LABEL[slot]} ?*\n"
+                    "Réponds en texte ou en vocal (« pâtes au thon et une pomme ») : je mets ton stock à jour et je te "
+                    "dis si ça colle avec ton entraînement.")
+            data = f"{now.date().isoformat()}:{index}"
+            markup = InlineKeyboardMarkup([[InlineKeyboardButton("🙅 Sauté", callback_data=f"q:s:{data}"),
+                                            InlineKeyboardButton("⏭️ Passer", callback_data=f"q:x:{data}")]])
+            await self._push(text, markup)
+            store.set_meal_check(key, "asked")
+            await agent.add_to_history(self.chat_id, f"[Question automatique du système : repas ({slot}) non noté]",
+                                       md_unescape(text))
+        except Exception:
+            logger.exception("Question repas en échec")
 
     async def check_weather(self) -> None:
         """Prévient (une fois par risque et par séance) en cas de pluie, chaleur, vent ou verglas, et quand ça s'arrange."""

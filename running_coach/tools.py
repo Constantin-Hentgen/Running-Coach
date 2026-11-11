@@ -140,22 +140,46 @@ def tool_update_stock(args: dict, ledger: Ledger) -> dict:
     return {"ok": True, **r}
 
 
-def tool_propose_meal(args: dict, ledger: Ledger) -> dict:
-    title = " ".join((args.get("title") or "").split())[:80]
-    if not title:
-        raise ValueError("titre vide")
+def _uses(args: dict) -> list[dict]:
     uses = []
     for u in args.get("uses") or []:
         name = " ".join(str(u.get("name") or "").split())
         if name:
             left = " ".join(str(u.get("qty_left") or "").split())[:40]
             uses.append({"name": name, **({"qty_left": left} if left else {})})
+    return uses
+
+
+def tool_propose_meal(args: dict, ledger: Ledger) -> dict:
+    title = " ".join((args.get("title") or "").split())[:80]
+    if not title:
+        raise ValueError("titre vide")
+    uses = _uses(args)
     if not uses:
         raise ValueError("aucun ingrédient du stock : pas de bouton pour ce plat")
-    pid = store.add_proposal(title, kind="meal", uses=uses)
+    makes = " ".join(str(args.get("makes") or "").split())[:40] or None
+    pid = store.add_proposal(title, kind="meal", uses=uses, makes=makes,
+                             macros={k: args.get(k) for k in ("kcal", "protein_g", "carbs_g")})
     ledger.record("meal", title, True, detail=str(pid))
     return {"ok": True, "meal_id": pid,
             "note": "Un bouton « mangé / cuisiné » est affiché sous ta réponse ; ne mets pas le stock à jour toi-même."}
+
+
+def tool_log_meal(args: dict, ledger: Ledger) -> dict:
+    at = cs.parse_dt(args["time"]) if args.get("time") else cs.now_utc()
+    if at > cs.now_utc() + datetime.timedelta(minutes=5):
+        raise ValueError("repas dans le futur : n'enregistre que ce qui a été mangé")
+    item = store.log_meal(args.get("description", ""), at, kcal=args.get("kcal"),
+                          protein_g=args.get("protein_g"), carbs_g=args.get("carbs_g"))
+    ledger.record("meal_log", f"{item['time']} {item['text']}", True)
+    result = {"ok": True, "logged": item}
+    if uses := _uses(args):
+        r = store.update_pantry(remove=uses)
+        changes = [f"−{x}" for x in r["removed"]] + r["updated"]
+        if changes:
+            ledger.record("stock", ", ".join(changes), True)
+        result["stock"] = r
+    return result
 
 
 def tool_edit_shopping_list(args: dict, ledger: Ledger) -> dict:
@@ -488,6 +512,11 @@ MEAL_TOOL = {
         "type": "object",
         "properties": {
             "title": {"type": "string", "description": "nom court du plat, ex: « Bowl saumon riz »"},
+            "makes": {"type": "string", "description": "batch cooking seulement (cuisiné pour plus tard, pas mangé tout "
+                      "de suite) : ce que ça donne, ex: « 4 boîtes » ; le plat entre alors au stock"},
+            "kcal": {"type": "integer", "description": "estimation pour une portion"},
+            "protein_g": {"type": "integer"},
+            "carbs_g": {"type": "integer"},
             "uses": {"type": "array", "items": {"type": "object", "properties": {
                 "name": {"type": "string"},
                 "qty_left": {"type": "string", "description": "ce qu'il en restera, ex: « 300 g » ; omettre si fini"}},
@@ -497,7 +526,30 @@ MEAL_TOOL = {
     },
 }
 
-_COMMON = [*MEMORY_TOOLS, *GOAL_TOOLS, PROPOSE_TOOL, *SHOPPING_TOOLS, EDIT_SHOPPING_TOOL, STOCK_TOOL, MEAL_TOOL]
+LOG_MEAL_TOOL = {
+    "name": "log_meal",
+    "description": (
+        "Note dans le journal alimentaire un repas ou une collation que l'athlète DIT avoir mangé (réponse à « qu'as-tu "
+        "mangé ? » ou spontanément), un par repas. `uses` retire du stock ce qu'il a consommé (noms exacts du stock, "
+        "qty_left s'il en reste) : pas besoin d'update_stock en plus. Estime kcal, protéines et glucides (portions "
+        "habituelles si non précisées). Ne pas utiliser pour un plat seulement proposé (propose_meal)."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "description": {"type": "string", "description": "ex: « Curry de poulet + riz (1 boîte), yaourt »"},
+            "time": {"type": "string", "description": "heure du repas (pas de ta réponse), ISO, ex: 2026-11-11T12:30:00"},
+            "kcal": {"type": "integer"},
+            "protein_g": {"type": "integer"},
+            "carbs_g": {"type": "integer"},
+            "uses": {"type": "array", "items": {"type": "object", "properties": {
+                "name": {"type": "string"}, "qty_left": {"type": "string"}}, "required": ["name"]}},
+        },
+        "required": ["description"],
+    },
+}
+
+_COMMON = [*MEMORY_TOOLS, *GOAL_TOOLS, PROPOSE_TOOL, *SHOPPING_TOOLS, EDIT_SHOPPING_TOOL, STOCK_TOOL, MEAL_TOOL, LOG_MEAL_TOOL]
 ALL_TOOLS = [LIST_TOOL, *WRITE_TOOLS, *_COMMON]
 READ_ONLY_TOOLS = [LIST_TOOL, *_COMMON]
 
@@ -515,6 +567,7 @@ _IMPL = {
     "update_stock": tool_update_stock,
     "edit_shopping_list": tool_edit_shopping_list,
     "propose_meal": tool_propose_meal,
+    "log_meal": tool_log_meal,
 }
 
 
@@ -552,6 +605,8 @@ def build_report(ledger: Ledger, truncated: bool, error: str | None = None) -> s
     if memory:
         lines += [f"{_MEMORY_ICONS[a.kind]} : {md_escape(a.label)}" for a in memory]
     for a in ledger.actions:
+        if a.kind == "meal_log":
+            lines.append(f"🍽️ Repas noté : {md_escape(a.label)}")
         if a.kind == "stock":
             lines.append(f"🥫 Stock : {md_escape(a.label)}")
         if a.kind == "shopping_edit":

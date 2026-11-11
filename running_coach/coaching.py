@@ -130,6 +130,69 @@ def format_pantry(pantry: list[dict], today: datetime.date) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Journal alimentaire et questions « qu'as-tu mangé ? »
+# ---------------------------------------------------------------------------
+
+def meal_slot(t: datetime.time) -> str:
+    """Repas correspondant à une heure de question (posée environ une heure après le repas)."""
+    hour = (t.hour - 1) % 24
+    if 4 <= hour < 11:
+        return "petit-déjeuner"
+    if 11 <= hour < 16:
+        return "déjeuner"
+    if 16 <= hour < 18:
+        return "collation"
+    return "dîner"
+
+
+def meal_window(times: list[tuple[int, int]], index: int) -> tuple[datetime.time, datetime.time, str]:
+    """Plage couverte par la question n° index : depuis la question précédente (04:00 pour la première), 5 h au plus."""
+    end = datetime.time(*times[index])
+    previous = times[index - 1] if index > 0 else (4, 0)
+    # au plus 5 h avant : la collation de 16 h n'est pas une trace du dîner
+    earliest = max(0, end.hour * 60 + end.minute - 5 * 60)
+    start_min = max(previous[0] * 60 + previous[1], earliest)
+    return datetime.time(start_min // 60, start_min % 60), end, meal_slot(end)
+
+
+MEAL_SLOT_LABEL = {"petit-déjeuner": "au petit-déjeuner", "déjeuner": "au déjeuner", "collation": "en collation",
+                   "dîner": "au dîner"}
+
+
+def has_meal_between(meals: list[dict], day: datetime.date, start: datetime.time, end: datetime.time) -> bool:
+    lo, hi, d = f"{start:%H:%M}", f"{end:%H:%M}", day.isoformat()
+    return any(m["date"] == d and lo < m["time"] <= hi for m in meals)
+
+
+def _macros(kcal, protein, carbs) -> str:
+    parts = [f"~{kcal} kcal" if kcal is not None else "", f"P {protein} g" if protein is not None else "",
+             f"G {carbs} g" if carbs is not None else ""]
+    return ", ".join(p for p in parts if p)
+
+
+def meals_context(meals: list[dict], today: datetime.date) -> str:
+    """Repas notés (aujourd'hui et hier) avec le total estimé du jour."""
+    if not meals:
+        return "aucun repas noté aujourd'hui ni hier"
+    lines = []
+    for day in (today - datetime.timedelta(days=1), today):
+        of_day = [m for m in meals if m["date"] == day.isoformat()]
+        label = "aujourd'hui" if day == today else "hier"
+        if not of_day:
+            lines.append(f"{label} ({_day(day)}) : rien de noté")
+            continue
+        lines.append(f"{label} ({_day(day)}) :")
+        for m in of_day:
+            macros = _macros(m.get("kcal"), m.get("protein_g"), m.get("carbs_g"))
+            lines.append(f"- {m['time']} {m['text']}" + (f" ({macros})" if macros else ""))
+        totals = [sum(m.get(k) or 0 for m in of_day) if any(m.get(k) is not None for m in of_day) else None
+                  for k in ("kcal", "protein_g", "carbs_g")]
+        if any(t is not None for t in totals):
+            lines.append(f"  total estimé : {_macros(*totals)}")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Bilan de la semaine : prévu (agenda) vs réalisé (Dreeve)
 # ---------------------------------------------------------------------------
 

@@ -28,6 +28,7 @@ MAX_SHOPPING_ITEMS = 60   # boutons Telegram : 100 max par message, rayons compr
 MAX_PANTRY_ITEMS = 120
 MAX_KEEPS_DAYS = 60       # au-delà : produit qui se garde, pas de date
 PANTRY_ASK_GRACE_DAYS = 3 # « Encore là ? » sans réponse depuis ce délai : l'article sort du stock
+MEAL_LOG_DAYS = 30        # journal alimentaire conservé
 LEGS = {"fraiches": "fraîches", "normales": "normales", "lourdes": "lourdes", "douleur": "douleur"}
 
 
@@ -88,6 +89,10 @@ class Store:
         # stock en cuisine : {id, name, qty, added, source, keeps (jours ou None), due (date à vérifier), asked (date)}
         state.setdefault("pantry", [])
         state.setdefault("next_pantry_id", 1)
+        # journal alimentaire : {id, date, time (HH:MM), text, kcal, protein_g, carbs_g, source}
+        state.setdefault("meals", [])
+        state.setdefault("next_meal_id", 1)
+        state.setdefault("meal_checks", {})   # « date créneau » → asked | skipped | answered (question « qu'as-tu mangé ? »)
         for p in state["pantry"]:
             if "id" not in p:
                 p["id"] = state["next_pantry_id"]
@@ -504,6 +509,47 @@ class Store:
             self._save()
             return dict(item)
 
+
+    # --- journal alimentaire ---------------------------------------------------------
+
+    def log_meal(self, text: str, at: datetime.datetime, source: str = "conversation",
+                 kcal=None, protein_g=None, carbs_g=None) -> dict:
+        """Repas mangé (texte libre + estimations facultatives). Les entrées de plus de MEAL_LOG_DAYS jours sont purgées."""
+        text = " ".join((text or "").split())[:200]
+        if not text:
+            raise ValueError("repas vide")
+
+        def number(v):
+            try:
+                return max(0, round(float(v))) if v not in (None, "") else None
+            except (TypeError, ValueError):
+                return None
+        at = at.astimezone(TZ)
+        with self._lock:
+            cutoff = (at.date() - datetime.timedelta(days=MEAL_LOG_DAYS)).isoformat()
+            self.state["meals"] = [m for m in self.state["meals"] if m["date"] >= cutoff]
+            item = {"id": self.state["next_meal_id"], "date": at.date().isoformat(), "time": f"{at:%H:%M}",
+                    "text": text, "kcal": number(kcal), "protein_g": number(protein_g), "carbs_g": number(carbs_g),
+                    "source": source}
+            self.state["next_meal_id"] += 1
+            self.state["meals"].append(item)
+            self.state["meals"].sort(key=lambda m: (m["date"], m["time"]))
+            self._save()
+        return dict(item)
+
+    def meals_since(self, day: datetime.date) -> list[dict]:
+        return [dict(m) for m in self.state["meals"] if m["date"] >= day.isoformat()]
+
+    def meal_check(self, key: str) -> str | None:
+        return self.state["meal_checks"].get(key)
+
+    def set_meal_check(self, key: str, status: str) -> None:
+        with self._lock:
+            checks = self.state["meal_checks"]
+            checks[key] = status
+            for old in sorted(checks)[:-60]:   # garde les plus récents (clés « AAAA-MM-JJ créneau »)
+                checks.pop(old)
+            self._save()
 
     # --- ressenti après séance --------------------------------------------------------
 

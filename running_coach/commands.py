@@ -60,7 +60,7 @@ HELP_TEXT = """🏃 *Ton coach running*
 
 Tu peux aussi m'envoyer des *vocaux* 🎙️. Quand je propose un changement, des boutons te permettent de l'appliquer.
 
-_Automatique : débrief et ressenti après chaque run, briefing chaque matin, bilan le dimanche soir, alerte météo (pluie, chaleur, vent, verglas) sur tes séances, « encore là ? » sur les produits frais du stock._"""
+_Automatique : débrief et ressenti après chaque run, briefing chaque matin, bilan le dimanche soir, alerte météo (pluie, chaleur, vent, verglas) sur tes séances, « encore là ? » sur les produits frais du stock, « qu'as-tu mangé ? » quand je n'ai aucune trace d'un repas._"""
 
 
 def parse_days(args: list[str], default: int = AGENDA_DEFAULT_DAYS, maximum: int = AGENDA_MAX_DAYS) -> int:
@@ -88,8 +88,9 @@ def eat_prompt(now: datetime.datetime) -> str:
         "- Quantités et 3 à 6 étapes courtes.\n"
         "- Si ça se prête aux boîtes, combien en faire pour plus tard.\n"
         "Une seule proposition, plus éventuellement une alternative express en une ligne. Appelle propose_meal pour le "
-        "plat (et pour l'alternative) avec les ingrédients du stock qu'il consomme : j'aurai un bouton pour dire que je "
-        "l'ai mangé, et c'est lui qui retirera ces ingrédients du stock. Ne modifie pas l'agenda."
+        "plat (et pour l'alternative) avec les ingrédients du stock qu'il consomme et ses estimations (kcal, protéines, "
+        "glucides) : j'aurai un bouton pour dire que je l'ai mangé, qui retirera ces ingrédients du stock et notera le "
+        "repas. Tiens compte de ce que j'ai déjà mangé aujourd'hui (repas notés). Ne modifie pas l'agenda."
     )
 
 
@@ -111,7 +112,8 @@ def recipes_prompt(lst: dict) -> str:
         "- 🥣 Petits-déjeuners et collations rapides : 2-3 lignes.\n"
         "- Une ligne pour un article de la liste non utilisé ou un ingrédient qui manquerait.\n"
         "Pour chaque recette, appelle propose_meal (titre = nom de la recette, uses = articles de la liste ou du stock "
-        "qu'elle consomme) : j'aurai un bouton « cuisiné » qui les retirera du stock.\n"
+        "qu'elle consomme, makes = nombre de boîtes ou portions, estimations par portion) : j'aurai un bouton « cuisiné » "
+        "qui retirera les ingrédients du stock et y mettra les boîtes.\n"
         "Ne modifie pas l'agenda et n'appelle pas save_shopping_list."
     )
 
