@@ -668,6 +668,28 @@ def test_meal_button_removes_ingredients_once(tmp_path, monkeypatch):
     assert without is not None and [p["name"] for p in store.pantry] == ["Riz"]
 
 
+def test_eat_choice_sends_the_recipe_updates_stock_and_drops_other_dishes(tmp_path, monkeypatch):
+    from running_coach import tools
+    b, store = _bot(tmp_path, monkeypatch)
+    monkeypatch.setattr(tools, "store", store)
+    store.update_pantry(add=[{"name": "Pâtes", "qty": "500 g"}, {"name": "Thon"}])
+    ledger = tools.Ledger()
+    pasta = tools.tool_propose_meal({"title": "Pâtes au thon", "kcal": 700, "recipe": "1. Cuire les pâtes\n2. Ajouter le thon",
+                                     "uses": [{"name": "Pâtes", "qty_left": "350 g"}, {"name": "Thon"}]}, ledger)["meal_id"]
+    omelette = tools.tool_propose_meal({"title": "Omelette", "recipe": "🛒 Œufs\n1. Battre", "uses": []}, ledger)["meal_id"]
+    asyncio.run(b._deliver(agent.AgentReply("Deux idées", meals=[(pasta, "Pâtes au thon"), (omelette, "Omelette")])))
+    text, markup = b.sent[-1]
+    assert "Choisis ton plat" in text and "Cuire" not in text                 # recette envoyée au choix seulement
+    assert _buttons(markup) == [("🍽️ Pâtes au thon", f"m:{pasta}"), ("🍽️ Omelette", f"m:{omelette}")]
+
+    q = _click(b, f"m:{pasta}", markup)
+    assert q.edits[-1] == ("markup", None)                                    # les autres plats tombent
+    assert "Pâtes au thon" in b.sent[-1][0] and "1. Cuire les pâtes" in b.sent[-1][0] and "−Thon" in b.sent[-1][0]
+    assert {p["name"]: p["qty"] for p in store.pantry} == {"Pâtes": "350 g"}
+    assert [m["kcal"] for m in store.meals_since(datetime.date(2020, 1, 1))] == [700]
+    assert _click(b, f"m:{omelette}").answers == ["Déjà noté."]
+
+
 def test_recipes_keep_their_cooked_buttons_when_redisplayed(tmp_path, monkeypatch):
     b, store = _bot(tmp_path, monkeypatch)
     lst = store.set_shopping_list([{"name": "Poulet", "keeps": 3}])

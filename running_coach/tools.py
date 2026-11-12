@@ -140,6 +140,9 @@ def tool_update_stock(args: dict, ledger: Ledger) -> dict:
     return {"ok": True, **r}
 
 
+MAX_RECIPE_CHARS = 2000
+
+
 def _uses(args: dict) -> list[dict]:
     uses = []
     for u in args.get("uses") or []:
@@ -155,14 +158,16 @@ def tool_propose_meal(args: dict, ledger: Ledger) -> dict:
     if not title:
         raise ValueError("titre vide")
     uses = _uses(args)
-    if not uses:
+    recipe = (args.get("recipe") or "").strip()[:MAX_RECIPE_CHARS] or None
+    if not uses and not recipe:
         raise ValueError("aucun ingrédient du stock : pas de bouton pour ce plat")
     makes = " ".join(str(args.get("makes") or "").split())[:40] or None
-    pid = store.add_proposal(title, kind="meal", uses=uses, makes=makes,
+    pid = store.add_proposal(title, kind="meal", uses=uses, makes=makes, recipe=recipe,
                              macros={k: args.get(k) for k in ("kcal", "protein_g", "carbs_g")})
     ledger.record("meal", title, True, detail=str(pid))
-    return {"ok": True, "meal_id": pid,
-            "note": "Un bouton « mangé / cuisiné » est affiché sous ta réponse ; ne mets pas le stock à jour toi-même."}
+    note = ("Un bouton « choisir » est affiché sous ta réponse : la recette sera envoyée quand l'athlète choisira ce plat, "
+            "ne la recopie pas dans ta réponse." if recipe else "Un bouton « mangé / cuisiné » est affiché sous ta réponse.")
+    return {"ok": True, "meal_id": pid, "note": note + " Ne mets pas le stock à jour toi-même."}
 
 
 def tool_log_meal(args: dict, ledger: Ledger) -> dict:
@@ -512,6 +517,9 @@ MEAL_TOOL = {
         "type": "object",
         "properties": {
             "title": {"type": "string", "description": "nom court du plat, ex: « Bowl saumon riz »"},
+            "recipe": {"type": "string", "description": "/eat : la recette complète, envoyée seulement quand l'athlète "
+                       "choisit ce plat (bouton « choisir ») : ingrédients avec quantités (🥫 du stock / 🛒 à acheter), puis "
+                       "3 à 6 étapes courtes numérotées ; format Telegram concis. À omettre pour /recipes."},
             "makes": {"type": "string", "description": "batch cooking seulement (cuisiné pour plus tard, pas mangé tout "
                       "de suite) : ce que ça donne, ex: « 4 boîtes » ; le plat entre alors au stock"},
             "kcal": {"type": "integer", "description": "estimation pour une portion"},

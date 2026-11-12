@@ -91,9 +91,23 @@ def proposals_markup(proposals: list[tuple[int, str]]) -> tuple[str, InlineKeybo
 MEAL_HINT = "_Touche un plat une fois mangé ou cuisiné : ses ingrédients sortent du stock._"
 
 
+CHOOSE_HINT = "_Choisis ton plat : je t'envoie la recette et je retire ses ingrédients du stock._"
+
+
+def has_recipe(mid) -> bool:
+    """Plat proposé par /eat : choisi par bouton, sa recette est envoyée à ce moment-là."""
+    return bool((item := store.proposal(mid)) and item.get("recipe"))
+
+
 def meal_rows(meals: list[tuple[int, str]]) -> list[list[InlineKeyboardButton]]:
-    """Un bouton « mangé / cuisiné » par plat proposé (retire ses ingrédients du stock, sans IA)."""
-    return [[InlineKeyboardButton(f"✅ {title}"[:60], callback_data=f"m:{mid}")] for mid, title in meals]
+    """Un bouton par plat proposé : « choisir » (/eat, envoie la recette) ou « mangé / cuisiné » ; retire ses
+    ingrédients du stock, sans IA."""
+    return [[InlineKeyboardButton(f"{'🍽️' if has_recipe(mid) else '✅'} {title}"[:60], callback_data=f"m:{mid}")]
+            for mid, title in meals]
+
+
+def meal_hint(meals: list[tuple[int, str]]) -> str:
+    return CHOOSE_HINT if any(has_recipe(mid) for mid, _ in meals) else MEAL_HINT
 
 
 def open_meals(ids: list[int]) -> list[tuple[int, str]]:
@@ -170,7 +184,7 @@ class CoachBot:
         """Réponse de l'agent + propositions (pied de message et boutons)."""
         footer, markup = proposals_markup(reply.proposals)
         if reply.meals:
-            footer = "\n\n".join(part for part in (footer, MEAL_HINT) if part)
+            footer = "\n\n".join(part for part in (footer, meal_hint(reply.meals)) if part)
             markup = InlineKeyboardMarkup([*(markup.inline_keyboard if markup else ()), *meal_rows(reply.meals)])
         text = "\n\n".join(part for part in (header, reply.text, footer) if part)
         await send_text(self._sender(update), text, markup)
@@ -446,7 +460,14 @@ class CoachBot:
             return
         r = store.update_pantry(remove=item.get("uses") or [])
         await query.answer()
-        await query.edit_message_reply_markup(without_button(query.message.reply_markup, f"m:{mid}"))
+        markup = without_button(query.message.reply_markup, f"m:{mid}")
+        if item.get("recipe"):   # /eat : un seul plat choisi, les autres propositions tombent
+            for row in (markup.inline_keyboard if markup else ()):
+                for btn in row:
+                    if (btn.callback_data or "").startswith("m:") and has_recipe(other := btn.callback_data[2:]):
+                        store.close_proposal(other, "ignored")
+                        markup = without_button(markup, btn.callback_data)
+        await query.edit_message_reply_markup(markup)
         changes = [f"−{x}" for x in r["removed"]] + r["updated"]
         if item.get("makes"):   # batch cooking : les boîtes entrent au stock, rien n'est encore mangé
             store.update_pantry(add=[{"name": item["text"], "qty": item["makes"], "keeps_days": 4}])
@@ -460,6 +481,8 @@ class CoachBot:
             text += f"\n🥫 Stock : {md_escape(', '.join(changes))}"
         if r["not_found"]:
             text += f"\n_Pas dans le stock : {md_escape(', '.join(r['not_found']))}_"
+        if item.get("recipe"):
+            text = f"{text}\n\n{item['recipe']}"
         await self._push(text)
         await agent.add_to_history(self.chat_id, f"[L'athlète a confirmé avoir mangé / cuisiné : {item['text']}]", md_unescape(text))
 
