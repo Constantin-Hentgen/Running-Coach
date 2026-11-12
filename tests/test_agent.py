@@ -180,3 +180,17 @@ def test_long_proposal_is_kept_whole_with_a_short_summary(tmp_path, monkeypatch)
     assert store.proposal(out["proposal_id"])["text"].endswith("C) fin")                # plus de coupure à 1000
     with pytest.raises(ValueError, match="summary"):
         tools.tool_propose_change({"change": "x"}, tools.Ledger())
+
+
+def test_echoed_report_is_stripped_and_history_keeps_a_system_note(tmp_path, monkeypatch):
+    echoed = ("Semaine corrigée.\n\n📋 Compte-rendu Radicale (relu sur le serveur)\n- ✅ Supprimé : Run (mer 25/11)\n"
+              "6 réussie(s), 0 échec(s)\n\n🧠 Noté : [autre] footings ≥ 4,5 km\nBonne séance !")
+    assert agent.strip_echoed_report(echoed) == "Semaine corrigée.\n\nBonne séance !"
+    ledger = tools.Ledger()
+    ledger.record("delete", "Run (mer 25/11)", True)
+    ledger.record("update", "Sortie longue", False, detail="introuvable")
+    note = agent.history_note(ledger, False, None)
+    assert note.startswith("[Note système, ne pas recopier :") and "📋" not in note
+    assert "delete ok « Run (mer 25/11) »" in note and "update ÉCHEC « Sortie longue » (introuvable)" in note
+    assert agent.history_note(tools.Ledger(), False, None) == ""
+    assert "Tutoie" in agent.SYSTEM_PROMPT and "Jamais d'UID" in agent.SYSTEM_PROMPT

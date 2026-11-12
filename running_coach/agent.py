@@ -17,7 +17,7 @@ from .tools import ALL_TOOLS, READ_ONLY_TOOLS, Ledger, build_report, run_tool
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """
-Tu es le coach running personnel de l'athlète : expert, direct, concis et ultra-factuel.
+Tu es le coach running personnel de l'athlète : expert, direct, concis et factuel. Tu lui parles comme un coach qu'il connaît bien, en quelques phrases.
 
 RÈGLES DE TRANSPARENCE (IMPÉRATIVES) :
 1. Tu ne peux affirmer qu'une modification de l'agenda a été faite que si un outil l'a confirmée ("ok": true). Si un outil renvoie "ok": false, dis-le franchement et explique ce qu'il reste à faire.
@@ -85,6 +85,15 @@ NUTRITION :
 - Respecte strictement les préférences, régimes et allergies mémorisés. Pas d'avis médical : pour une pathologie, renvoie vers un professionnel.
 - Une liste de courses (alimentaires) ne va JAMAIS dans l'agenda d'entraînement : pas de `create_calendar_event` pour des courses, un repas ou une commande. Pour l'enregistrer (checklist à cocher dans Telegram, et événement dans l'agenda courses dédié s'il est configuré), utilise uniquement `save_shopping_list`.
 
+STYLE DE CONVERSATION (une discussion fluide sur Telegram, pas un rapport) :
+- Tutoie toujours l'athlète.
+- Va droit au but : la réponse d'abord, sans préambule (« Voici ce que je te propose… »), sans reformuler sa demande, sans répéter ce que tu as déjà dit plus haut dans la conversation.
+- Court par défaut : 2 à 6 lignes. Plus long seulement pour un débrief, un bilan, un plan ou si on te le demande.
+- Une seule question à la fois, et seulement si la réponse change vraiment ce que tu vas faire.
+- Jamais d'UID, d'identifiant technique ni de nom d'outil dans tes réponses.
+- Ne recopie jamais le compte-rendu système ni les « 🧠 Noté » : le système les ajoute lui-même sous ta réponse. Les notes « [Note système…] » de l'historique sont pour toi, pas à recopier.
+- Pas de formule rassurante répétitive (« rien n'est modifié tant que… », « je ne touche à rien ») : le système l'indique déjà.
+
 FORMAT TELEGRAM : listes à puces (`-`), gras (`*texte*`), émojis sobres. ZÉRO TABLEAU (pas de `|`).
 """.strip()
 
@@ -107,6 +116,28 @@ MISSING_PROPOSAL_NUDGE = (
 
 def announces_missing_proposal(text: str, proposals: list) -> bool:
     return not proposals and bool(ANNOUNCES_PROPOSAL.search(text or ""))
+
+
+# Lignes du compte-rendu système que le modèle recopie parfois dans sa réponse (le système l'ajoute lui-même).
+ECHOED_REPORT_LINE = re.compile(
+    r"^\s*(?:\*?📋 Compte-rendu|-?\s*[✅❌] (?:Créé|Modifié|Supprimé|ÉCHEC)\b|_?\d+ réussie\(s\)|"
+    r"🧠 Noté\s*:|🗑️ Oublié\s*:|🎯 Objectif enregistré\s*:|🏁 Objectif retiré\s*:|💡 Propositions?\b)")
+
+
+def strip_echoed_report(text: str) -> str:
+    lines = [line for line in (text or "").splitlines() if not ECHOED_REPORT_LINE.match(line)]
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+
+
+def history_note(ledger: Ledger, truncated: bool, error: str | None) -> str:
+    """Ce que le système a réellement fait pendant le run, pour l'historique (pas le format affiché à l'athlète)."""
+    done = [f"{a.kind} {'ok' if a.ok else 'ÉCHEC'} « {a.label} »" + (f" ({a.detail})" if not a.ok and a.detail else "")
+            for a in ledger.actions]
+    if truncated:
+        done.append("run interrompu (limite atteinte)")
+    if error:
+        done.append(f"erreur technique : {error}")
+    return f"[Note système, ne pas recopier : {' ; '.join(done)}]" if done else ""
 
 
 def claims_calendar_change(text: str) -> bool:
@@ -273,13 +304,15 @@ async def ask(user_prompt: str, chat_id: str = "default", allow_writes: bool = T
         elif not reply and not ledger.actions and not error:
             reply = "Je n'ai rien produit de concret sur cette demande (aucune réponse du modèle, aucune action)."
 
+        reply = strip_echoed_report(reply)
         report = build_report(ledger, truncated, error)
         final_text = f"{reply}\n\n{report}".strip()
 
-        # L'historique (persistant) contient ce qui s'est RÉELLEMENT passé, compte-rendu inclus
+        # L'historique (persistant) contient ce qui s'est RÉELLEMENT passé, mais sous forme de note système et non
+        # du compte-rendu affiché : sinon le modèle l'imite et le recopie dans ses réponses (doublons).
         history = store.history(chat_id) + [
             {"role": "user", "content": user_prompt},
-            {"role": "assistant", "content": final_text},
+            {"role": "assistant", "content": f"{reply}\n\n{history_note(ledger, truncated, error)}".strip()},
         ]
         store.set_history(chat_id, history[-settings.history_messages:])
 
