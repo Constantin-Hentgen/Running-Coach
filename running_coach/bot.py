@@ -54,6 +54,16 @@ REVIEW_PROMPT = (
 )
 
 APPLY_PROMPT = "Applique maintenant cette proposition que tu m'as faite et que je valide : {text}"
+MESSAGE_DEBOUNCE_S = 4.0   # silence attendu avant de répondre, pour regrouper les messages envoyés à la suite
+
+
+def merge_messages(texts: list[str]) -> str:
+    if len(texts) == 1:
+        return texts[0]
+    return ("Plusieurs messages envoyés à la suite, à traiter ensemble en une seule réponse :\n"
+            + "\n".join(f"{i}. {t}" for i, t in enumerate(texts, 1)))
+
+
 PAIN_FOLLOW_UP = ("😬 Où as-tu mal, depuis quand, et est-ce que ça gêne à la marche ? "
                   "Réponds-moi (texte ou vocal), j'adapterai la suite.")
 
@@ -169,6 +179,10 @@ class CoachBot:
         self._activity_lock = asyncio.Lock()   # jamais deux détections en parallèle (pas de double débrief)
         self._shopping_sync_lock = asyncio.Lock()   # écritures de la checklist dans l'agenda courses, une à la fois
         self._background: set[asyncio.Task] = set()
+        self._pending: list[str] = []          # messages reçus pas encore envoyés au coach
+        self._pending_update: Update | None = None
+        self._draining = False
+        self._last_message = 0.0
 
     # --- Envoi ---------------------------------------------------------------
 
@@ -215,7 +229,29 @@ class CoachBot:
     async def on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not update.message or not update.message.text or not await self._authorized(update):
             return
-        await self._ask_and_reply(update, update.message.text)
+        await self._enqueue(update, update.message.text)
+
+    async def _enqueue(self, update: Update, text: str) -> None:
+        """Messages envoyés coup sur coup → une seule réponse du coach.
+
+        On attend MESSAGE_DEBOUNCE_S de silence avant de lancer le coach ; ce qui arrive pendant qu'il réfléchit
+        part ensemble au tour suivant. Le premier message reçu fait le travail, les suivants s'ajoutent et rendent la main
+        (handlers concurrents, voir build_bot)."""
+        loop = asyncio.get_running_loop()
+        self._pending.append(text)
+        self._pending_update = update
+        self._last_message = loop.time()
+        if self._draining:
+            return
+        self._draining = True
+        try:
+            while self._pending:
+                while (wait := self._last_message + MESSAGE_DEBOUNCE_S - loop.time()) > 0:
+                    await asyncio.sleep(wait)
+                texts, self._pending = self._pending, []
+                await self._ask_and_reply(self._pending_update, merge_messages(texts))
+        finally:
+            self._draining = False
 
     async def on_voice(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Vocal → transcription locale (Whisper) → traité comme un message écrit."""
@@ -242,7 +278,7 @@ class CoachBot:
             await update.message.reply_text("🎙️ Je n'ai rien entendu de clair. Tu peux réessayer ?")
             return
         await update.message.reply_text(f"🎙️ « {text} »")
-        await self._ask_and_reply(update, text)
+        await self._enqueue(update, text)
 
     async def _ask_and_reply(self, update: Update, prompt: str, allow_writes: bool = True,
                              planning: bool = False, header: str = "") -> None:
@@ -731,7 +767,9 @@ class CoachBot:
 
 
 def build_bot() -> CoachBot:
-    app = Application.builder().token(settings.telegram_bot_token).build()
+    # Handlers concurrents : un message reçu pendant que le coach réfléchit est mis en attente (et regroupé)
+    # au lieu de bloquer la file ; l'agent sérialise lui-même ses exécutions.
+    app = Application.builder().token(settings.telegram_bot_token).concurrent_updates(True).build()
     bot = CoachBot(app)
     handlers = {
         "plan": bot.on_agenda, "load": bot.on_form, "runs": bot.on_last_runs, "weather": bot.on_weather,

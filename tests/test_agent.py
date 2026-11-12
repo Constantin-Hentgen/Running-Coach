@@ -200,3 +200,24 @@ def test_system_prompt_asks_to_challenge_unsound_requests():
     p = agent.SYSTEM_PROMPT
     assert "CHALLENGER LES DEMANDES" in p and "sans rediscuter" in p and "(nouveau − ancien) / ancien" in p
     assert p.index("CHALLENGER") < p.index("OBJECTIFS ET PÉRIODISATION")
+
+
+def test_empty_reply_is_retried_once(tmp_path, monkeypatch):
+    store = Store(tmp_path / "state.json")
+    monkeypatch.setattr(agent, "store", store)
+    monkeypatch.setattr(tools, "store", store)
+
+    async def fake_context():
+        return "CONTEXTE"
+
+    async def no_tools():
+        return []
+
+    monkeypatch.setattr(agent, "_gather_context", fake_context)
+    monkeypatch.setattr(dreeve_mcp, "load_tools", no_tools)
+    empty = NS(stop_reason="end_turn", usage=_usage(), content=[])
+    final = NS(stop_reason="end_turn", usage=_usage(), content=[NS(type="text", text="C'est noté.")])
+    fake = FakeMessages([empty, final])
+    monkeypatch.setattr(agent, "_client", NS(messages=fake))
+    reply = asyncio.run(agent.ask("ok", chat_id="1"))
+    assert reply.text == "C'est noté." and len(fake.calls) == 2

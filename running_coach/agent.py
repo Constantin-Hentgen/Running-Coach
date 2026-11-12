@@ -123,6 +123,9 @@ MISSING_PROPOSAL_NUDGE = (
 )
 
 
+EMPTY_REPLY_NUDGE = "[Système] Ta réponse était vide. Réponds maintenant au message de l'athlète ci-dessus."
+
+
 def announces_missing_proposal(text: str, proposals: list) -> bool:
     return not proposals and bool(ANNOUNCES_PROPOSAL.search(text or ""))
 
@@ -295,6 +298,10 @@ async def ask(user_prompt: str, chat_id: str = "default", allow_writes: bool = T
             messages = store.history(chat_id)
             messages.append({"role": "user", "content": f"{context}\n\nMessage de l'utilisateur : \"{user_prompt}\""})
             reply, truncated = await _run_loop(messages, tools, ledger, model)
+            if not reply and not truncated and not ledger.actions:   # réponse vide sans aucune action : on relance une fois
+                logger.warning("Réponse vide du modèle : relance")
+                messages += [{"role": "assistant", "content": "(vide)"}, {"role": "user", "content": EMPTY_REPLY_NUDGE}]
+                reply, truncated = await _run_loop(messages, tools, ledger, model)
             if not truncated and "propose_change" in {t["name"] for t in tools} and announces_missing_proposal(
                     reply, [a for a in ledger.actions if a.kind == "proposal"]):
                 logger.warning("Proposition annoncée sans propose_change : relance")

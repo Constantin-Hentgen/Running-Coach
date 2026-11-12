@@ -41,6 +41,8 @@ def _bot(tmp_path, monkeypatch, runs=(), asked=None, proposals=()):
     b = bot_module.CoachBot.__new__(bot_module.CoachBot)
     b.chat_id, b._activity_lock, b.sent = "42", asyncio.Lock(), []
     b._shopping_sync_lock, b._background = asyncio.Lock(), set()
+    b._pending, b._pending_update, b._draining, b._last_message = [], None, False, 0.0
+    monkeypatch.setattr(bot_module, "MESSAGE_DEBOUNCE_S", 0)
 
     async def fake_send(text, **kwargs):
         b.sent.append((text, kwargs.get("reply_markup")))
@@ -924,3 +926,27 @@ def test_meal_prep_prompts_aim_at_filling_free_boxes_with_variety():
                    commands.shopping_prompt(7, datetime.date(2026, 11, 9))):
         assert "boîtes" in prompt and "vari" in prompt
     assert "PRÉPARATION DES REPAS" in agent.SYSTEM_PROMPT
+
+
+def test_messages_sent_in_a_row_get_one_reply(tmp_path, monkeypatch):
+    asked = []
+    b, store = _bot(tmp_path, monkeypatch, asked=asked)
+    monkeypatch.setattr(bot_module, "MESSAGE_DEBOUNCE_S", 0.05)
+
+    async def reply_text(text, **kwargs):
+        pass
+
+    def update(text):
+        return NS(message=NS(text=text, reply_text=reply_text), effective_message=NS(reply_text=reply_text),
+                  effective_chat=NS(id=42, send_action=_noop))
+
+    async def burst():
+        first = asyncio.create_task(b.on_message(update("fais toutes les modifs pour les +10 %"), None))
+        await asyncio.sleep(0.01)
+        await b.on_message(update("et une semaine à 15 km max toutes les 3 semaines"), None)   # rend la main tout de suite
+        await first
+
+    asyncio.run(burst())
+    (prompt, _), = asked
+    assert "à traiter ensemble" in prompt and "1. fais toutes les modifs" in prompt and "2. et une semaine" in prompt
+    assert bot_module.merge_messages(["seul"]) == "seul"
