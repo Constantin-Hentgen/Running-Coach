@@ -62,7 +62,8 @@ RESSENTI APRÈS SÉANCE :
 - Le contexte donne les ressentis récents (effort perçu 1-10, état des jambes). Ils pèsent autant que la charge Dreeve : effort élevé sur une séance censée être facile, jambes lourdes répétées ou douleur = signal de fatigue, allège.
 
 PROPOSITIONS :
-- Quand tu suggères un changement d'agenda sans le faire (débrief, bilan, alerte, ou quand tu demandes confirmation), appelle `propose_change` avec un texte autonome et précis : l'athlète aura des boutons Appliquer / Ajuster / Ignorer. Dans ta réponse, résume la proposition en une ligne.
+- Quand tu suggères un changement d'agenda sans le faire (débrief, bilan, alerte, ou quand tu demandes confirmation), appelle `propose_change` : `summary` = une ligne lisible pour l'athlète, `change` = le détail complet pour l'exécution. Le système affiche le summary avec les boutons Appliquer / Ajuster / Ignorer : ne recopie ni le détail ni les UID dans ta réponse.
+- N'annonce jamais une proposition ou des boutons sans avoir appelé `propose_change` dans ce même tour.
 
 MÉTHODE POUR MODIFIER L'AGENDA :
 - Les événements existants sont fournis avec leur UID. Identifie précisément ceux à toucher (dates + titre) et opère par UID.
@@ -92,6 +93,20 @@ FORMAT TELEGRAM : listes à puces (`-`), gras (`*texte*`), émojis sobres. ZÉRO
 # ni une question (« le déplacer ? »). Les infinitifs (« déplacer », « ajouter ») ne comptent pas.
 CLAIM_PATTERN = re.compile(r"\b(?:supprimé|créé|planifié|modifié|mis à jour|déplacé|ajouté|réorganisé|remplacé)(?:e?s?)\b", re.I)
 NEGATION = re.compile(r"\b(?:n['’]|ne|pas|rien|aucun|aucune|jamais)\b|\bn['’]", re.I)
+
+
+# Le modèle annonce une proposition à valider (« boutons ci-dessous », « clique sur Appliquer ») sans l'avoir enregistrée.
+# « Appliquer » avec majuscule = le nom du bouton (pas « je peux l'appliquer »).
+ANNOUNCES_PROPOSAL = re.compile(r"\bAppliquer\b|\b[Bb]outons?\b|[Pp]ropositions? (?:est |sont )?(?:ci-dessous|sous ce message)")
+MISSING_PROPOSAL_NUDGE = (
+    "[Système] Ta réponse annonce une proposition à valider, mais tu n'as pas appelé propose_change : l'athlète ne "
+    "voit aucun bouton. Appelle propose_change maintenant pour chaque proposition, puis redonne ta réponse complète. "
+    "Si tu n'as en fait rien à proposer, réécris ta réponse sans parler de boutons ni de proposition."
+)
+
+
+def announces_missing_proposal(text: str, proposals: list) -> bool:
+    return not proposals and bool(ANNOUNCES_PROPOSAL.search(text or ""))
 
 
 def claims_calendar_change(text: str) -> bool:
@@ -240,6 +255,13 @@ async def ask(user_prompt: str, chat_id: str = "default", allow_writes: bool = T
             messages = store.history(chat_id)
             messages.append({"role": "user", "content": f"{context}\n\nMessage de l'utilisateur : \"{user_prompt}\""})
             reply, truncated = await _run_loop(messages, tools, ledger, model)
+            if not truncated and "propose_change" in {t["name"] for t in tools} and announces_missing_proposal(
+                    reply, [a for a in ledger.actions if a.kind == "proposal"]):
+                logger.warning("Proposition annoncée sans propose_change : relance")
+                messages += [{"role": "assistant", "content": reply or "(vide)"},
+                             {"role": "user", "content": MISSING_PROPOSAL_NUDGE}]
+                retry, truncated = await _run_loop(messages, tools, ledger, model)
+                reply = retry or reply
         except Exception as e:
             logger.exception("Erreur dans la boucle agent")
             error = f"{type(e).__name__}: {e}"

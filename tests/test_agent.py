@@ -112,7 +112,8 @@ def test_planning_model_and_proposal_without_false_claim_warning(tmp_path, monke
     monkeypatch.setattr(agent, "_gather_context", fake_context)
     monkeypatch.setattr(dreeve_mcp, "load_tools", no_tools)
     propose = NS(stop_reason="tool_use", usage=_usage(), content=[
-        NS(type="tool_use", id="p1", name="propose_change", input={"change": "Déplacer le seuil de jeudi à vendredi 18:00"}),
+        NS(type="tool_use", id="p1", name="propose_change", input={"summary": "Seuil décalé à vendredi",
+                                                                   "change": "Déplacer le seuil de jeudi à vendredi 18:00"}),
     ])
     final = NS(stop_reason="end_turn", usage=_usage(),
                content=[NS(type="text", text="Je te propose de déplacer le seuil à vendredi.")])
@@ -121,8 +122,9 @@ def test_planning_model_and_proposal_without_false_claim_warning(tmp_path, monke
 
     reply = asyncio.run(agent.ask("bilan", chat_id="1", allow_writes=False, planning=True))
     assert fake.calls[0]["model"] == agent.settings.planning_model
-    assert len(reply.proposals) == 1 and reply.proposals[0][1] == "Déplacer le seuil de jeudi à vendredi 18:00"
+    assert len(reply.proposals) == 1 and reply.proposals[0][1] == "Seuil décalé à vendredi"
     assert store.proposal(reply.proposals[0][0])["status"] == "open"
+    assert store.proposal(reply.proposals[0][0])["text"] == "Déplacer le seuil de jeudi à vendredi 18:00"
     assert "Aucune modification" not in reply.text   # « déplacer » proposé, pas prétendu fait
     names = {t["name"] for t in fake.calls[0]["tools"]}
     assert {"propose_change", "set_goal", "remove_goal"} <= names and "create_calendar_event" not in names
@@ -134,3 +136,47 @@ def test_claim_detection_ignores_negations_questions_and_infinitives():
     assert not agent.claims_calendar_change("L'événement existe déjà. Je n'ai rien modifié.")
     assert not agent.claims_calendar_change("Tu veux que je la déplace ?\n- Le déplacer ou changer sa durée ;")
     assert not agent.claims_calendar_change("Aucune séance n'a été supprimée.")
+
+
+def test_announced_proposal_without_tool_call_is_retried(tmp_path, monkeypatch):
+    store = Store(tmp_path / "state.json")
+    monkeypatch.setattr(agent, "store", store)
+    monkeypatch.setattr(tools, "store", store)
+
+    async def fake_context():
+        return "CONTEXTE"
+
+    async def no_tools():
+        return []
+
+    monkeypatch.setattr(agent, "_gather_context", fake_context)
+    monkeypatch.setattr(dreeve_mcp, "load_tools", no_tools)
+    forgot = NS(stop_reason="end_turn", usage=_usage(), content=[NS(type="text", text="Voici 3 changements, boutons ci-dessous.")])
+    propose = NS(stop_reason="tool_use", usage=_usage(), content=[
+        NS(type="tool_use", id="p1", name="propose_change", input={"summary": "Semaine allégée à 15 km", "change": "détail"})])
+    final = NS(stop_reason="end_turn", usage=_usage(), content=[NS(type="text", text="Voici la proposition.")])
+    fake = FakeMessages([forgot, propose, final])
+    monkeypatch.setattr(agent, "_client", NS(messages=fake))
+
+    reply = asyncio.run(agent.ask("tu proposes quoi ?", chat_id="1"))
+    assert [label for _, label in reply.proposals] == ["Semaine allégée à 15 km"]
+    assert reply.text.startswith("Voici la proposition.")
+    assert {"role": "user", "content": agent.MISSING_PROPOSAL_NUDGE} in fake.calls[1]["messages"]   # relance explicite
+
+
+def test_proposal_announcement_detection():
+    assert agent.announces_missing_proposal("Tu as les boutons Appliquer / Ignorer sous ce message.", [])
+    assert agent.announces_missing_proposal("Ma proposition est ci-dessous.", [])
+    assert not agent.announces_missing_proposal("Je peux l'appliquer si tu veux.", [])
+    assert not agent.announces_missing_proposal("Clique sur Appliquer.", [(1, "x")])
+
+
+def test_long_proposal_is_kept_whole_with_a_short_summary(tmp_path, monkeypatch):
+    import pytest
+    store = Store(tmp_path / "state.json")
+    monkeypatch.setattr(tools, "store", store)
+    detail = "A) " + "modifier la séance (UID x) ; " * 60 + "C) fin"
+    out = tools.tool_propose_change({"summary": "3 semaines remises à +10 %", "change": detail}, tools.Ledger())
+    assert store.proposal(out["proposal_id"])["text"].endswith("C) fin")                # plus de coupure à 1000
+    with pytest.raises(ValueError, match="summary"):
+        tools.tool_propose_change({"change": "x"}, tools.Ledger())

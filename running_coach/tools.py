@@ -124,13 +124,27 @@ def tool_remove_goal(args: dict, ledger: Ledger) -> dict:
     return {"ok": True, "removed": item["title"]}
 
 
+MAX_PROPOSAL_CHARS = 8000   # le détail est renvoyé tel quel à l'application : ne jamais le couper en route
+MAX_SUMMARY_CHARS = 200
+
+
 def tool_propose_change(args: dict, ledger: Ledger) -> dict:
-    text = " ".join((args.get("change") or "").split())
+    text = (args.get("change") or "").strip()
     if not text:
         raise ValueError("proposition vide")
-    pid = store.add_proposal(text[:1000])
-    ledger.record("proposal", text, True, detail=str(pid))
-    return {"ok": True, "proposal_id": pid, "note": "Des boutons Appliquer / Ajuster / Ignorer seront affichés sous ta réponse."}
+    if len(text) > MAX_PROPOSAL_CHARS:
+        raise ValueError(f"proposition trop longue ({len(text)} > {MAX_PROPOSAL_CHARS} caractères) : découpe-la en "
+                         "plusieurs propositions (une par semaine par exemple)")
+    summary = " ".join((args.get("summary") or "").split())
+    if not summary:
+        raise ValueError("summary manquant : une ligne courte et lisible pour l'athlète")
+    if len(summary) > MAX_SUMMARY_CHARS:
+        raise ValueError(f"summary trop long ({len(summary)} > {MAX_SUMMARY_CHARS}) : une ligne, sans UID ni détail")
+    pid = store.add_proposal(text, summary=summary)
+    ledger.record("proposal", summary, True, detail=str(pid))
+    return {"ok": True, "proposal_id": pid,
+            "note": "L'athlète voit le summary avec des boutons Appliquer / Ajuster / Ignorer sous ta réponse ; ne "
+                    "recopie pas le détail dans ta réponse."}
 
 
 def tool_update_stock(args: dict, ledger: Ledger) -> dict:
@@ -403,13 +417,19 @@ PROPOSE_TOOL = {
     "description": (
         "Enregistre un changement de l'agenda d'ENTRAÎNEMENT que tu PROPOSES sans le faire (débrief, bilan, alerte météo, ou "
         "quand tu demandes confirmation). Jamais pour la liste de courses ni le stock : ceux-là, fais-les directement. L'athlète verra des boutons Appliquer / Ajuster / Ignorer : s'il clique Appliquer, ce texte te sera "
-        "renvoyé pour exécution, il doit donc être autonome et précis (séance, date, heure, contenu, UID si connu). "
-        "Une proposition par appel ; n'en fais pas pour un simple conseil sans changement d'agenda."
+        "renvoyé pour exécution, il doit donc être autonome, précis et complet (séances, dates, heures, contenus, UID). "
+        "Seul `summary` est montré à l'athlète. Une proposition par appel ; n'en fais pas pour un simple conseil sans "
+        "changement d'agenda."
     ),
     "input_schema": {
         "type": "object",
-        "properties": {"change": {"type": "string", "description": "ex: « Déplacer le fractionné du mar 10/11 18:30 (UID …) au mer 11/11 18:30, même contenu »"}},
-        "required": ["change"],
+        "properties": {
+            "summary": {"type": "string", "description": "ce que voit l'athlète : une ligne courte en langage courant, "
+                        "sans UID ni horaires détaillés, ex: « Fractionné de mardi décalé à mercredi soir »"},
+            "change": {"type": "string", "description": "le détail complet pour l'exécution, ex: « Déplacer le "
+                       "fractionné du mar 10/11 18:30 (UID …) au mer 11/11 18:30, même contenu »"},
+        },
+        "required": ["summary", "change"],
     },
 }
 
