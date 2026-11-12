@@ -17,6 +17,12 @@ from .config import TZ, settings
 logger = logging.getLogger(__name__)
 
 CATEGORIES = ["preference", "habitude", "contrainte", "objectif", "santé", "nutrition", "équipement", "autre"]
+# Priorité d'un souvenir : 1 = règle (toujours appliquée, sauf demande explicite contraire), 2 = préférence forte
+# (appliquée sauf bonne raison, à expliquer), 3 = indication (à prendre en compte quand c'est possible).
+PRIORITIES = {1: "RÈGLES (toujours appliquées, sauf demande explicite contraire de l'athlète)",
+              2: "PRÉFÉRENCES FORTES (appliquées sauf bonne raison, à expliquer)",
+              3: "INDICATIONS (à prendre en compte quand c'est possible)"}
+DEFAULT_PRIORITY = 2
 MAX_ITEMS = 80
 MAX_TEXT = 300
 GOAL_KINDS = ["course", "santé", "autre"]
@@ -55,6 +61,13 @@ def parse_seed(raw: str | None) -> list[tuple[str, str]]:
         else:
             items.append(("autre", part))
     return items
+
+
+def priority_of(value) -> int:
+    try:
+        return int(value) if int(value) in PRIORITIES else DEFAULT_PRIORITY
+    except (TypeError, ValueError):
+        return DEFAULT_PRIORITY
 
 
 class Store:
@@ -117,10 +130,11 @@ class Store:
             logger.error(f"Impossible d'écrire la mémoire ({self.path}) : {e}")
 
     @staticmethod
-    def _append(state: dict, category: str, text: str, source: str) -> dict:
+    def _append(state: dict, category: str, text: str, source: str, priority: int = DEFAULT_PRIORITY) -> dict:
         item = {
             "id": state["next_id"],
             "category": category,
+            "priority": priority,
             "text": text,
             "source": source,
             "date": datetime.datetime.now(TZ).date().isoformat(),
@@ -135,7 +149,8 @@ class Store:
     def memories(self) -> list[dict]:
         return list(self.state["memories"])
 
-    def remember(self, category: str, text: str, source: str = "conversation", replaces: int | None = None) -> dict:
+    def remember(self, category: str, text: str, source: str = "conversation", replaces: int | None = None,
+                 priority: int | None = None) -> dict:
         text = " ".join((text or "").split())
         if not text:
             raise ValueError("texte vide")
@@ -150,7 +165,7 @@ class Store:
                 raise ValueError("déjà mémorisé")
             if len(self.state["memories"]) >= MAX_ITEMS:
                 raise ValueError(f"mémoire pleine ({MAX_ITEMS}) : oublie ou fusionne des éléments obsolètes d'abord")
-            item = self._append(self.state, category, text, source)
+            item = self._append(self.state, category, text, source, priority_of(priority))
             self._save()
         return item
 
@@ -167,12 +182,18 @@ class Store:
         return item
 
     def render(self) -> str:
-        """Bloc texte stable (trié par catégorie puis id) pour le prompt système."""
+        """Bloc texte stable pour le prompt système : par priorité (règles d'abord), puis catégorie, puis id."""
         if not self.state["memories"]:
             return "(rien pour l'instant)"
         order = {c: i for i, c in enumerate(CATEGORIES)}
-        items = sorted(self.state["memories"], key=lambda m: (order.get(m["category"], 99), m["id"]))
-        return "\n".join(f"- #{m['id']} [{m['category']}] {m['text']} (depuis {m['date']})" for m in items)
+        blocks = []
+        for prio, title in PRIORITIES.items():
+            items = sorted((m for m in self.state["memories"] if priority_of(m.get("priority")) == prio),
+                           key=lambda m: (order.get(m["category"], 99), m["id"]))
+            if items:
+                blocks.append(f"{title} :\n" + "\n".join(
+                    f"- #{m['id']} [{m['category']}] {m['text']} (depuis {m['date']})" for m in items))
+        return "\n\n".join(blocks)
 
     # --- historique & état ------------------------------------------------------
 

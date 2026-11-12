@@ -125,3 +125,30 @@ def test_format_load():
                                "acRatio": {"value": 1.25, "status": "LOW_RISK"}, "weeklyTrimp": 300,
                                "monotony": 1.2, "strain": 360, "restDaysLast7Days": 2})
     assert "TSB -10 (NEUTRAL)" in text and "ratio A/C 1.25" in text
+
+
+def test_memories_are_rendered_by_priority_and_old_ones_default_to_strong(tmp_path):
+    store = Store(tmp_path / "s.json")
+    store.remember("preference", "Court plutôt le midi", priority=3)
+    store.remember("contrainte", "Footings de 4,5 km minimum", priority=1)
+    old = store.remember("habitude", "Télétravail lundi et jeudi")
+    del store.state["memories"][-1]["priority"]                       # souvenir d'avant les priorités
+    store.remember("preference", "Pas deux sorties consécutives", priority="9")   # invalide → défaut
+    text = store.render()
+    rules, strong, hints = text.split("\n\n")
+    assert rules.startswith("RÈGLES") and "#2 [contrainte] Footings de 4,5 km minimum" in rules
+    assert strong.startswith("PRÉFÉRENCES FORTES") and f"#{old['id']} [habitude]" in strong and "consécutives" in strong
+    assert hints.startswith("INDICATIONS") and "le midi" in hints
+
+
+def test_remember_tool_takes_a_priority_and_merges_by_replacing(tmp_path, monkeypatch):
+    from running_coach import tools
+    store = Store(tmp_path / "s.json")
+    monkeypatch.setattr(tools, "store", store)
+    ledger = tools.Ledger()
+    first = tools.tool_remember({"category": "preference", "text": "Footings de 4,5 km"}, ledger)
+    tools.tool_remember({"category": "contrainte", "text": "Footings de 4,5 km minimum, 5 à 6,5 km ou sortie longue",
+                         "priority": 1, "replaces_id": first["id"]}, ledger)
+    (m,) = store.state["memories"]
+    assert m["priority"] == 1 and m["text"].startswith("Footings de 4,5 km minimum")
+    assert ledger.actions[-1].label.endswith("(règle)")

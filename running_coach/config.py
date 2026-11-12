@@ -217,7 +217,7 @@ class Settings:
             activity_poll_minutes=_int("ACTIVITY_POLL_MINUTES", 1),
             planning_horizon_days=_int("PLANNING_HORIZON_DAYS", 30),
             context_days_ahead=_int("CALENDAR_CONTEXT_DAYS", 45),
-            history_messages=_int("HISTORY_MESSAGES", 6),
+            history_messages=_int("HISTORY_MESSAGES", 20),
             seed_memory=_str("COACH_SEED_MEMORY"),
             data_dir=_str("COACH_DATA_DIR", "data"),
             http_timeout=_int("HTTP_TIMEOUT", 8),

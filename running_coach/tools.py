@@ -98,8 +98,9 @@ def tool_remember(args: dict, ledger: Ledger) -> dict:
     replaces = args.get("replaces_id")
     item = store.remember(args.get("category", "autre"), args.get("text", ""),
                           source=args.get("source") or "conversation",
-                          replaces=int(replaces) if replaces not in (None, "") else None)
-    ledger.record("remember", f"[{item['category']}] {item['text']}", True)
+                          replaces=int(replaces) if replaces not in (None, "") else None,
+                          priority=args.get("priority"))
+    ledger.record("remember", item["text"] + (" (règle)" if item["priority"] == 1 else ""), True)
     return {"ok": True, "id": item["id"]}
 
 
@@ -357,7 +358,8 @@ MEMORY_TOOLS = [
             "préférence (horaires, types de séance), habitude, contrainte (agenda, travail, famille), objectif (course, chrono), "
             "santé (blessure, douleur, sommeil, poids), nutrition (régime, allergies, aliments aimés ou évités, foyer, budget), équipement. Une phrase courte, factuelle, autonome, datée si utile. "
             "N'enregistre PAS l'éphémère (une séance ponctuelle, la météo du jour). "
-            "Si cela contredit ou précise un souvenir existant, passe son id dans replaces_id pour le remplacer."
+            "Un seul souvenir par sujet : si un souvenir existant porte sur le même sujet (le contredit, le précise ou le "
+            "complète), passe son id dans replaces_id et écris la version fusionnée, au lieu d'en ajouter un second."
         ),
         "input_schema": {
             "type": "object",
@@ -366,6 +368,11 @@ MEMORY_TOOLS = [
                 "text": {"type": "string", "description": "≤ 300 caractères, ex: « Préfère courir le matin avant 8h en semaine »"},
                 "source": {"type": "string", "enum": ["conversation", "observation"],
                            "description": "conversation = dit par l'athlète ; observation = déduit de ses données (répété et net uniquement)"},
+                "priority": {"type": "integer", "enum": [1, 2, 3], "description": (
+                    "1 = règle : l'athlète l'exprime comme absolu (« toujours », « jamais », « minimum », contrainte "
+                    "physique ou d'agenda) ; 2 = préférence forte (« je préfère », « idéalement », par défaut) ; "
+                    "3 = indication (« plutôt », « si possible », habitude observée). Si tu hésites entre 1 et 2, "
+                    "demande-le à l'athlète en une question.")},
                 "replaces_id": {"type": "integer", "description": "id du souvenir rendu obsolète par celui-ci"},
             },
             "required": ["category", "text"],

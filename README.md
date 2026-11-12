@@ -179,7 +179,7 @@ The `RAIN_ALERT_*` variables keep their historical names but drive all weather a
 | `ACTIVITY_POLL_MINUTES` | `1` | New-run detection interval; `0` = disabled |
 | `PLANNING_HORIZON_DAYS` | `30` | Days (re)planned by the briefing |
 | `CALENDAR_CONTEXT_DAYS` | `45` | Days of calendar given to the coach |
-| `HISTORY_MESSAGES` | `6` | Chat messages kept as history |
+| `HISTORY_MESSAGES` | `20` | Chat messages kept as history (10 exchanges) |
 | `COACH_SEED_MEMORY` | — | Starting knowledge, format `category: text \| category: text` (categories: `preference`, `habitude`, `contrainte`, `objectif`, `santé`, `nutrition`, `équipement`, `autre`). Read **once**, when the memory is first created. Single line |
 
 ### Technical
