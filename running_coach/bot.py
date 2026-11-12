@@ -679,20 +679,30 @@ class CoachBot:
             fresh = dreeve.new_runs_since(runs, previous)
             if not fresh:
                 return False
-            store.last_activity_id = runs[0].get("id")
             if previous is None:   # tout premier passage : simple référence, pas de notification
+                store.last_activity_id = runs[0].get("id")
                 return False
 
             logger.info(f"{len(fresh)} nouveau(x) run(s) détecté(s) ({source}) : {[r.get('id') for r in fresh]}")
             what = "une nouvelle séance" if len(fresh) == 1 else f"{len(fresh)} nouvelles séances (la dernière compte le plus)"
-            prompt = DEBRIEF_PROMPT.format(intro=f"Je viens de terminer et d'uploader {what}",
-                                           runs="\n".join(dreeve.format_activity(r) for r in fresh))
+            runs_text = "\n".join(dreeve.format_activity(r) for r in fresh)
+            prompt = DEBRIEF_PROMPT.format(intro=f"Je viens de terminer et d'uploader {what}", runs=runs_text)
             try:
                 reply = await agent.ask(prompt, chat_id=self.chat_id, allow_writes=False)
+            except Exception:   # l'agent ne doit pas faire perdre le récap : on envoie au moins les chiffres
+                logger.exception("Débrief de séance : agent en échec, envoi du récap brut")
+                reply = agent.AgentReply(f"{runs_text}\n\n_(Analyse du coach indisponible, demande /debrief pour réessayer.)_")
+            try:
                 await self._deliver(reply, header="⚡ *Nouveau run détecté !*")
+            except Exception:   # run non marqué comme vu : nouvel essai au prochain passage
+                logger.exception("Débrief de séance : envoi Telegram en échec, nouvel essai au prochain passage")
+                return False
+            # marqué comme vu seulement une fois le récap livré, pour qu'un échec ne fasse pas perdre le run
+            store.last_activity_id = runs[0].get("id")
+            try:
                 await self._ask_checkin(fresh[-1])
             except Exception:
-                logger.exception("Débrief de séance en échec")
+                logger.exception("Demande de ressenti en échec")
             return True
 
 

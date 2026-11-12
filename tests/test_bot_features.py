@@ -77,6 +77,42 @@ def test_check_new_activity_debriefs_all_new_runs_once(tmp_path, monkeypatch):
     assert store.last_activity_id == 3
 
 
+def test_check_new_activity_sends_raw_recap_when_agent_fails(tmp_path, monkeypatch):
+    runs = [_run(1)]
+    b, store = _bot(tmp_path, monkeypatch, runs)
+    store.last_activity_id = 1
+    runs.insert(0, _run(2))
+
+    async def broken_ask(*args, **kwargs):
+        raise RuntimeError("API indisponible")
+
+    monkeypatch.setattr(bot_module.agent, "ask", broken_ask)
+    assert asyncio.run(b.check_new_activity()) is True
+    recap, checkin = b.sent
+    assert recap[0].startswith("⚡ *Nouveau run détecté !*") and "Run 2" in recap[0] and "/debrief" in recap[0]
+    assert "Run 2" in checkin[0]
+    assert store.last_activity_id == 2
+
+
+def test_check_new_activity_retries_when_telegram_fails(tmp_path, monkeypatch):
+    runs = [_run(1)]
+    b, store = _bot(tmp_path, monkeypatch, runs)
+    store.last_activity_id = 1
+    runs.insert(0, _run(2))
+    sender = b._sender
+
+    async def down(text, **kwargs):
+        raise RuntimeError("Telegram injoignable")
+
+    b._sender = lambda update=None: down
+    assert asyncio.run(b.check_new_activity()) is False
+    assert store.last_activity_id == 1   # pas marqué comme vu : rien n'est perdu
+
+    b._sender = sender
+    assert asyncio.run(b.check_new_activity()) is True
+    assert b.sent[0][0].startswith("⚡") and "Run 2" in b.sent[1][0] and store.last_activity_id == 2
+
+
 
 # --- Commandes ---------------------------------------------------------------
 
