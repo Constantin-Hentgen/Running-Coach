@@ -194,3 +194,9 @@ def test_echoed_report_is_stripped_and_history_keeps_a_system_note(tmp_path, mon
     assert "delete ok « Run (mer 25/11) »" in note and "update ÉCHEC « Sortie longue » (introuvable)" in note
     assert agent.history_note(tools.Ledger(), False, None) == ""
     assert "Tutoie" in agent.SYSTEM_PROMPT and "Jamais d'UID" in agent.SYSTEM_PROMPT
+
+
+def test_system_prompt_asks_to_challenge_unsound_requests():
+    p = agent.SYSTEM_PROMPT
+    assert "CHALLENGER LES DEMANDES" in p and "sans rediscuter" in p and "(nouveau − ancien) / ancien" in p
+    assert p.index("CHALLENGER") < p.index("OBJECTIFS ET PÉRIODISATION")
