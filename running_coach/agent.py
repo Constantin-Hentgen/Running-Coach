@@ -22,7 +22,7 @@ Tu es le coach running personnel de l'athlète : expert, direct, concis et factu
 RÈGLES DE TRANSPARENCE (IMPÉRATIVES) :
 1. Tu ne peux affirmer qu'une modification de l'agenda a été faite que si un outil l'a confirmée ("ok": true). Si un outil renvoie "ok": false, dis-le franchement et explique ce qu'il reste à faire.
 2. Le SYSTÈME ajoute lui-même, sous ta réponse, un compte-rendu vérifié des actions réellement effectuées (agenda et mémoire). Ne le recopie pas : concentre-toi sur le fond (pourquoi ces choix, charge, météo, conseils).
-3. Si la demande est ambiguë ou si tu ne trouves pas l'événement visé, demande une précision au lieu de supposer.
+3. Si tu ne trouves pas l'événement visé, ou si deux lectures de la demande mènent à des actions d'agenda différentes, demande une précision avant de modifier l'agenda (voir RÉPONDRE À LA QUESTION).
 4. Descriptions d'événements : multi-lignes (`\\n`) avec émojis.
 
 MÉMOIRE (tu apprends l'athlète au fil du temps) :
@@ -94,6 +94,12 @@ NUTRITION :
 - Respecte strictement les préférences, régimes et allergies mémorisés. Pas d'avis médical : pour une pathologie, renvoie vers un professionnel.
 - Une liste de courses (alimentaires) ne va JAMAIS dans l'agenda d'entraînement : pas de `create_calendar_event` pour des courses, un repas ou une commande. Pour l'enregistrer (checklist à cocher dans Telegram, et événement dans l'agenda courses dédié s'il est configuré), utilise uniquement `save_shopping_list`.
 
+RÉPONDRE À LA QUESTION (jamais d'esquive) :
+- Ta première phrase répond à ce que l'athlète vient de dire : sa question, son avis demandé, sa consigne. On te demande ton avis (« c'est une bonne idée ? », « t'en penses quoi ? ») : donne un avis tranché (oui / non / oui mais…) et la raison principale.
+- Interprète avec la conversation : « ça », « cette semaine », « c'est une bonne idée », « tu proposes quoi » renvoient au sujet des derniers messages. Ne dis jamais « je ne suis pas sûr de ce que tu vises » quand le contexte le dit.
+- Ambiguïté réelle (deux lectures qui mènent à des actions différentes) : pars sur la lecture la plus probable et dis-le en une ligne (« je pars sur la semaine du 30 nov, dis-moi si tu parlais d'une autre »). Pas de menu d'options a) / b) / c).
+- Une consigne claire s'exécute (ou se challenge, voir EXPERTISE) : on ne la renvoie pas sous forme de question.
+
 STYLE DE CONVERSATION (une discussion fluide sur Telegram, pas un rapport) :
 - Tutoie toujours l'athlète.
 - Va droit au but : la réponse d'abord, sans préambule (« Voici ce que je te propose… »), sans reformuler sa demande, sans répéter ce que tu as déjà dit plus haut dans la conversation.
@@ -121,6 +127,27 @@ MISSING_PROPOSAL_NUDGE = (
     "voit aucun bouton. Appelle propose_change maintenant pour chaque proposition, puis redonne ta réponse complète. "
     "Si tu n'as en fait rien à proposer, réécris ta réponse sans parler de boutons ni de proposition."
 )
+
+
+# Le modèle esquive : il dit ne pas comprendre ce que l'athlète vise, ou renvoie un menu d'options au lieu de répondre.
+# Cherché seulement au début de la réponse (l'esquive y est ; plus loin, c'est souvent une vraie précision ciblée).
+DODGE_OPENING = re.compile(
+    r"\bje ne (?:suis pas (?:s[uû]r|certaine?)|sais pas(?: trop| exactement| bien)?) (?:de (?:bien )?(?:comprendre|voir)|(?:de )?(?:ce que|à quoi|de quoi|quelle?)\b)"
+    r"|\b(?:tu (?:veux dire|parles de|vises) (?:lequel|laquelle|quoi|quelle?)\b|de quoi (?:tu parles|parles-tu)|qu['’]entends-tu"
+    r"|(?:peux|pourrais)-tu (?:me )?préciser)",
+    re.I)
+DODGE_OPTION_MENU = re.compile(r"^\s*(?:[-•]\s*)?\*?[a-c]\)", re.I | re.M)
+DODGE_NUDGE = (
+    "[Système] Ta réponse n'a pas répondu au message de l'athlète : tu lui renvoies la question (tu dis ne pas savoir ce "
+    "qu'il vise, ou tu lui donnes un menu d'options). Relis les derniers messages : le sujet y est. Réponds directement "
+    "dès la première phrase (un avis tranché si on te demande ton avis, l'action si c'est une consigne). Si deux lectures "
+    "restent vraiment possibles, pars sur la plus probable et dis-le en une ligne, sans menu."
+)
+
+
+def dodges_the_question(text: str) -> bool:
+    text = (text or "").strip()
+    return bool(DODGE_OPENING.search(text[:300])) or len(DODGE_OPTION_MENU.findall(text)) >= 3
 
 
 EMPTY_REPLY_NUDGE = "[Système] Ta réponse était vide. Réponds maintenant au message de l'athlète ci-dessus."
@@ -307,6 +334,12 @@ async def ask(user_prompt: str, chat_id: str = "default", allow_writes: bool = T
                 logger.warning("Proposition annoncée sans propose_change : relance")
                 messages += [{"role": "assistant", "content": reply or "(vide)"},
                              {"role": "user", "content": MISSING_PROPOSAL_NUDGE}]
+                retry, truncated = await _run_loop(messages, tools, ledger, model)
+                reply = retry or reply
+            if not truncated and not ledger.actions and dodges_the_question(reply):   # esquive : on relance une fois
+                logger.warning("Réponse qui esquive la question : relance")
+                messages += [{"role": "assistant", "content": reply},
+                             {"role": "user", "content": DODGE_NUDGE}]
                 retry, truncated = await _run_loop(messages, tools, ledger, model)
                 reply = retry or reply
         except Exception as e:

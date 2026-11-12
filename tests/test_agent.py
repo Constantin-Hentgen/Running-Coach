@@ -221,3 +221,37 @@ def test_empty_reply_is_retried_once(tmp_path, monkeypatch):
     monkeypatch.setattr(agent, "_client", NS(messages=fake))
     reply = asyncio.run(agent.ask("ok", chat_id="1"))
     assert reply.text == "C'est noté." and len(fake.calls) == 2
+
+
+def test_dodge_detection():
+    assert agent.dodges_the_question("Je ne suis pas sûr de ce que tu vises : la progression ou la course ?")
+    assert agent.dodges_the_question("Je ne sais pas exactement de quoi tu parles.")
+    assert agent.dodges_the_question("Tu veux dire lequel ?\n- a) garder\n- b) remonter")
+    assert agent.dodges_the_question("Avant tout :\n- a) Garder le plan\n- b) Remonter le volume\n- c) Autre semaine ?")
+    assert not agent.dodges_the_question("Non, pas une bonne idée : ton ratio A/C est à 3,37.")
+    assert not agent.dodges_the_question("Option A ou B pour le repos ?\n- A) pas d'événement\n- B) repos explicites")
+    long_ok = "Oui, garde-la. " + "Détail. " * 60 + "Je ne suis pas sûr de la météo dimanche."
+    assert not agent.dodges_the_question(long_ok)
+    assert "RÉPONDRE À LA QUESTION" in agent.SYSTEM_PROMPT
+
+
+def test_dodging_reply_is_retried_once(tmp_path, monkeypatch):
+    store = Store(tmp_path / "state.json")
+    monkeypatch.setattr(agent, "store", store)
+    monkeypatch.setattr(tools, "store", store)
+
+    async def fake_context():
+        return "CONTEXTE"
+
+    async def no_tools():
+        return []
+
+    monkeypatch.setattr(agent, "_gather_context", fake_context)
+    monkeypatch.setattr(dreeve_mcp, "load_tools", no_tools)
+    dodge = NS(stop_reason="end_turn", usage=_usage(), content=[NS(type="text", text="Je ne suis pas sûr de ce que tu vises.")])
+    final = NS(stop_reason="end_turn", usage=_usage(), content=[NS(type="text", text="Non : +58 % c'est trop.")])
+    fake = FakeMessages([dodge, final])
+    monkeypatch.setattr(agent, "_client", NS(messages=fake))
+    reply = asyncio.run(agent.ask("c'est une bonne idée ?", chat_id="1"))
+    assert reply.text == "Non : +58 % c'est trop." and len(fake.calls) == 2
+    assert {"role": "user", "content": agent.DODGE_NUDGE} in fake.calls[1]["messages"]
