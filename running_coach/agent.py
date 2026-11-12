@@ -47,6 +47,12 @@ STOCK EN CUISINE :
 - Dès que l'athlète dit avoir acheté, fini, jeté ou cuisiné autre chose, mets le stock à jour avec `update_stock` (retire ce qui est fini, réduis avec qty_left ce qui a été entamé, `keeps_days` pour un produit frais ajouté). Pas besoin de le lui demander.
 - Le stock est une estimation : sans info, ne suppose pas qu'un article frais ancien est encore là, demande.
 
+PRÉPARATION DES REPAS (BOÎTES) :
+- L'objectif est l'efficacité : quand l'athlète cuisine, en profiter pour remplir ses boîtes (tups) libres avec les repas des prochains jours, plutôt que de cuisiner à chaque repas. Le contexte donne le nombre de boîtes occupées et libres : ne prévois jamais plus de boîtes que celles qui sont libres au moment de cuisiner.
+- Variété toujours : pas le même plat plus de 2 repas d'affilée ; varie la protéine et le féculent d'une boîte à l'autre ; plutôt 2 plats différents qu'un seul en 3 boîtes.
+- Une boîte prête au stock passe avant tout le reste (zéro cuisine), en commençant par la plus ancienne. Quand l'athlète mange une boîte, mets le stock à jour (`log_meal` avec `uses` et qty_left = les boîtes restantes).
+- Quand l'athlète dit avoir rangé un plat en boîtes, `update_stock` avec `boxes: true` et qty = le nombre de boîtes.
+
 JOURNAL ALIMENTAIRE :
 - Le contexte donne les repas notés aujourd'hui et hier (heure, contenu, estimations). Le système demande « qu'as-tu mangé ? » après un repas dont il n'a aucune trace.
 - Quand l'athlète dit ce qu'il a mangé (réponse à cette question ou spontanément), appelle `log_meal` pour chaque repas, à l'heure où il l'a mangé, avec tes estimations et `uses` pour ce qui sort du stock. Puis en 2 à 4 lignes : est-ce adapté à son entraînement (séance du jour faite ou à venir, sortie longue ou fractionné demain, charge, objectifs santé) au vu du total de la journée, ce qui manque ou est en trop (glucides, protéines, hydratation…), et un conseil concret pour le repas suivant, tiré du stock si possible.
@@ -146,6 +152,7 @@ async def _gather_context() -> str:
         f"- Objectifs (compte à rebours) :\n{coaching.goals_context(store.goals, now.date())}\n"
         f"- Ressentis après séance (14 derniers jours) :\n{coaching.checkins_context(store.recent_checkins(14, now.date()))}\n"
         f"- Stock en cuisine :\n{coaching.pantry_context(store.pantry, now.date())}\n"
+        f"- Boîtes repas (tups) : {coaching.boxes_context(store.pantry, settings.meal_boxes)}\n"
         f"- Repas notés :\n{coaching.meals_context(store.meals_since(now.date() - datetime.timedelta(days=1)), now.date())}\n"
         f"- Liste de courses en cours {coaching.shopping_context(store.shopping_list)}\n"
         f"- Prévisions météo :{forecast}\n"

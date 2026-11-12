@@ -887,3 +887,40 @@ def test_meal_question_only_without_any_trace_and_once(tmp_path, monkeypatch):
     assert "au dîner" in b.sent[-1][0]
     _click(b, "q:x:2026-11-11:2")
     assert store.meal_check("2026-11-11 dîner") == "skipped" and "on passe" in b.sent[-1][0]
+
+
+# --- Boîtes (tups) -------------------------------------------------------------------
+
+def test_boxes_are_counted_from_cooked_dishes_and_shrink_when_eaten(tmp_path, monkeypatch):
+    from running_coach import tools
+    b, store = _bot(tmp_path, monkeypatch)
+    monkeypatch.setattr(tools, "store", store)
+    store.update_pantry(add=[{"name": "Poulet"}, {"name": "Riz", "qty": "1 kg"}])
+    assert coaching.boxes_context(store.pantry, 3) == "0/3 occupées → 3 libre(s)"
+    cooked = store.add_proposal("Curry de poulet", kind="meal", uses=[{"name": "Poulet"}], makes="2 boîtes", macros={})
+    _click(b, f"m:{cooked}")
+    assert "📦 Boîtes : 2/3 occupées (Curry de poulet ×2) → 1 libre(s)" in b.sent[-1][0]
+    tools.tool_log_meal({"description": "Curry (1 boîte)", "uses": [{"name": "Curry de poulet", "qty_left": "1 boîte"}]},
+                        tools.Ledger())
+    assert coaching.boxes_context(store.pantry, 3) == "1/3 occupées (Curry de poulet ×1) → 2 libre(s)"
+    tools.tool_update_stock({"add": [{"name": "Chili", "qty": "2 boîtes", "boxes": True}]}, tools.Ledger())
+    assert coaching.boxes_in_use(store.pantry) == [("Curry de poulet", 1), ("Chili", 2)]
+    assert coaching.box_count(None) == 1 and coaching.box_count("3 tups") == 3
+
+
+def test_a_dish_cannot_need_more_boxes_than_owned(tmp_path, monkeypatch):
+    import pytest
+    from running_coach import tools
+    monkeypatch.setattr(tools, "store", Store(tmp_path / "s.json"))
+    with pytest.raises(ValueError, match="3 boîtes"):
+        tools.tool_propose_meal({"title": "Lasagnes", "makes": "6 boîtes", "uses": [{"name": "Pâtes"}]}, tools.Ledger())
+    assert tools.tool_propose_meal({"title": "Lasagnes", "makes": "3 boîtes", "uses": [{"name": "Pâtes"}]},
+                                   tools.Ledger())["ok"]
+
+
+def test_meal_prep_prompts_aim_at_filling_free_boxes_with_variety():
+    for prompt in (commands.eat_prompt(datetime.datetime(2026, 11, 9, 12, 30)),
+                   commands.recipes_prompt({"items": [{"name": "Riz"}]}),
+                   commands.shopping_prompt(7, datetime.date(2026, 11, 9))):
+        assert "boîtes" in prompt and "vari" in prompt
+    assert "PRÉPARATION DES REPAS" in agent.SYSTEM_PROMPT

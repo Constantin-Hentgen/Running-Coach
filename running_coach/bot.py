@@ -470,9 +470,10 @@ class CoachBot:
         await query.edit_message_reply_markup(markup)
         changes = [f"−{x}" for x in r["removed"]] + r["updated"]
         if item.get("makes"):   # batch cooking : les boîtes entrent au stock, rien n'est encore mangé
-            store.update_pantry(add=[{"name": item["text"], "qty": item["makes"], "keeps_days": 4}])
+            store.update_pantry(add=[{"name": item["text"], "qty": item["makes"], "keeps_days": 4, "boxes": True}])
             changes.append(f"+{item['text']} ({item['makes']})")
-            text = f"🍳 *{md_escape(item['text'])}* cuisiné."
+            text = (f"🍳 *{md_escape(item['text'])}* cuisiné.\n"
+                    f"📦 Boîtes : {md_escape(coaching.boxes_context(store.pantry, settings.meal_boxes))}")
         else:                   # mangé : entre dans le journal alimentaire
             macros = item.get("macros") or {}
             store.log_meal(item["text"], datetime.datetime.now(TZ), source="bouton", **macros)

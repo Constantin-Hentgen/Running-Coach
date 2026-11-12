@@ -173,6 +173,7 @@ The `RAIN_ALERT_*` variables keep their historical names but drive all weather a
 | `BRIEFING_TIME` | `08:00` | Briefing time; `off` = disabled |
 | `WEEKLY_REVIEW_TIME` | `sun 19:00` | Weekly review day (`mon`…`sun`) and time; `off` = disabled (`/review` still works) |
 | `MEAL_CHECK_TIMES` | `10:30,14:30,21:30` | When to ask « Qu'as-tu mangé ? » (about an hour after each meal), only if no meal was logged since the previous question (5 h at most); `off` = never |
+| `MEAL_BOXES` | `3` | How many meal-prep boxes (tups) you own: the coach plans batch cooking to fill the free ones, never more |
 | `PANTRY_CHECK_TIME` | `18:00` | Daily « Encore là ? » check on fresh stock items that reached their keep-by date; `off` = disabled |
 | `WHISPER_MODEL` | `small` | Whisper model for voice notes: `tiny`, `base`, `small`, `medium` (bigger = more accurate, slower, more RAM); `off` = voice disabled |
 | `ACTIVITY_POLL_MINUTES` | `1` | New-run detection interval; `0` = disabled |

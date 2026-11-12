@@ -164,6 +164,7 @@ class Settings:
     weekly_review: tuple[int, int, int] | None
     pantry_check_time: tuple[int, int] | None
     meal_check_times: list[tuple[int, int]]
+    meal_boxes: int
     whisper_model: str | None
     activity_poll_minutes: int
     planning_horizon_days: int
@@ -211,6 +212,7 @@ class Settings:
             weekly_review=_weekly_time(_str("WEEKLY_REVIEW_TIME", "sun 19:00")),
             pantry_check_time=_briefing_time(_str("PANTRY_CHECK_TIME", "18:00"), "PANTRY_CHECK_TIME"),
             meal_check_times=_meal_times(_str("MEAL_CHECK_TIMES", "10:30,14:30,21:30")),
+            meal_boxes=max(1, _int("MEAL_BOXES", 3)),
             whisper_model=_optional_model(_str("WHISPER_MODEL", "small")),
             activity_poll_minutes=_int("ACTIVITY_POLL_MINUTES", 1),
             planning_horizon_days=_int("PLANNING_HORIZON_DAYS", 30),
@@ -251,7 +253,7 @@ class Settings:
             logger.info(f"[CONFIG] {name} : {'activé' if ok else 'désactivé'}")
         logger.info(f"[CONFIG] modèles={self.model} (conversation) / {self.planning_model} (planification), "
                     f"fuseau={self.tz.key}, briefing={self.briefing_time}, bilan hebdo={self.weekly_review}, "
-                    f"vérification du stock={self.pantry_check_time}, questions repas={self.meal_check_times}, "
+                    f"vérification du stock={self.pantry_check_time}, questions repas={self.meal_check_times}, boîtes={self.meal_boxes}, "
                     f"détection runs={self.activity_poll_minutes} min")
 
 

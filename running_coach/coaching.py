@@ -1,6 +1,7 @@
 """Logique de coaching calculée par le code (pas par le modèle) : compte à rebours des objectifs,
 résumé des ressentis après séance, bilan prévu / réalisé de la semaine."""
 import datetime
+import re
 
 from .config import FR_DAYS, TZ
 from .dreeve import distance_km, format_activity
@@ -111,6 +112,24 @@ def pantry_context(pantry: list[dict], today: datetime.date) -> str:
             age = " — acheté aujourd'hui" if days == 0 else f" — acheté il y a {days} j"
         lines.append(f"- {p['name']}" + (f" ({p['qty']})" if p.get("qty") else "") + age + _due_label(p, today))
     return "\n".join(lines)
+
+
+def box_count(qty) -> int:
+    """« 2 boîtes » → 2 ; sans nombre lisible → 1."""
+    m = re.match(r"\s*(\d+)", str(qty or ""))
+    return int(m.group(1)) if m else 1
+
+
+def boxes_in_use(pantry: list[dict]) -> list[tuple[str, int]]:
+    """Plats cuisinés en boîtes encore au stock : [(nom, nombre de boîtes)]."""
+    return [(p["name"], box_count(p.get("qty"))) for p in pantry if p.get("boxes")]
+
+
+def boxes_context(pantry: list[dict], total: int) -> str:
+    used = boxes_in_use(pantry)
+    n = sum(k for _, k in used)
+    detail = f" ({', '.join(f'{name} ×{k}' for name, k in used)})" if used else ""
+    return f"{n}/{total} occupées{detail} → {max(0, total - n)} libre(s)"
 
 
 def _due_label(p: dict, today: datetime.date) -> str:

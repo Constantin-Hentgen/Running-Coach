@@ -4,6 +4,7 @@ import logging
 from dataclasses import dataclass, field
 
 from . import calendar_store as cs
+from .coaching import box_count
 from .config import settings
 from .formatting import md_escape
 from .memory import CATEGORIES, GOAL_KINDS, GOAL_PRIORITIES, format_goal, store
@@ -162,6 +163,9 @@ def tool_propose_meal(args: dict, ledger: Ledger) -> dict:
     if not uses and not recipe:
         raise ValueError("aucun ingrédient du stock : pas de bouton pour ce plat")
     makes = " ".join(str(args.get("makes") or "").split())[:40] or None
+    if makes and box_count(makes) > settings.meal_boxes:
+        raise ValueError(f"l'athlète n'a que {settings.meal_boxes} boîtes : prévois-en {settings.meal_boxes} au plus "
+                         "(ou une autre session de cuisine)")
     pid = store.add_proposal(title, kind="meal", uses=uses, makes=makes, recipe=recipe,
                              macros={k: args.get(k) for k in ("kcal", "protein_g", "carbs_g")})
     ledger.record("meal", title, True, detail=str(pid))
@@ -495,10 +499,13 @@ STOCK_TOOL = {
         "properties": {
             "add": {"type": "array", "items": {"type": "object", "properties": {
                 "name": {"type": "string"}, "qty": {"type": "string", "description": "ex: « 6 », « 500 g », « 1 pot »"},
-                "keeps_days": {"type": "integer", "description": _KEEPS_DESC}},
+                "keeps_days": {"type": "integer", "description": _KEEPS_DESC},
+                "boxes": {"type": "boolean", "description": "plat cuisiné rangé en boîtes (tups) : qty = nombre de boîtes, "
+                          "ex: « 2 boîtes » ; compte dans les boîtes occupées"}},
                 "required": ["name"]}},
             "remove": {"type": "array", "items": {"type": "object", "properties": {
-                "name": {"type": "string"}, "qty_left": {"type": "string", "description": "ce qu'il en reste, si entamé"}},
+                "name": {"type": "string"}, "qty_left": {"type": "string", "description": "ce qu'il en reste, si entamé "
+                                                         "(pour un plat en boîtes : les boîtes restantes, ex: « 1 boîte »)"}},
                 "required": ["name"]}},
         },
     },
@@ -521,7 +528,8 @@ MEAL_TOOL = {
                        "choisit ce plat (bouton « choisir ») : ingrédients avec quantités (🥫 du stock / 🛒 à acheter), puis "
                        "3 à 6 étapes courtes numérotées ; format Telegram concis. À omettre pour /recipes."},
             "makes": {"type": "string", "description": "batch cooking seulement (cuisiné pour plus tard, pas mangé tout "
-                      "de suite) : ce que ça donne, ex: « 4 boîtes » ; le plat entre alors au stock"},
+                      "de suite) : nombre de boîtes, ex: « 2 boîtes » (pas plus que les boîtes libres au moment de cuisiner) ; "
+                      "le plat entre alors au stock"},
             "kcal": {"type": "integer", "description": "estimation pour une portion"},
             "protein_g": {"type": "integer"},
             "carbs_g": {"type": "integer"},

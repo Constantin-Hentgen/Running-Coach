@@ -446,7 +446,7 @@ class Store:
         return item
 
     def update_pantry(self, add: list[dict] | None = None, remove: list[dict] | None = None) -> dict:
-        """add : [{name, qty}] (même nom = remplacé) ; remove : [{name, qty_left?}] (qty_left = il en reste).
+        """add : [{name, qty, keeps_days?, boxes?}] (même nom = remplacé) ; remove : [{name, qty_left?}] (qty_left = il en reste).
         Retourne {added, removed, updated, not_found}."""
         out = {"added": [], "removed": [], "updated": [], "not_found": []}
         with self._lock:
@@ -465,6 +465,8 @@ class Store:
                 name = " ".join(str(a.get("name") or "").split())
                 if name:
                     item = self._pantry_put(name, a.get("qty"), "conversation", a.get("keeps_days"))
+                    if a.get("boxes"):   # plat cuisiné en boîtes : compte dans les tups occupées
+                        item["boxes"] = True
                     out["added"].append(item["name"] + (f" ({item['qty']})" if item["qty"] else ""))
             self._save()
         return out
