@@ -1,0 +1,165 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 640" width="640" height="640">
+  <title>Bob, the friendly trail-running robot</title>
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3B2A6B"/>
+      <stop offset="0.38" stop-color="#C4527A"/>
+      <stop offset="0.62" stop-color="#FF8A5B"/>
+      <stop offset="1" stop-color="#FFC27A"/>
+    </linearGradient>
+    <radialGradient id="sunGlow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#FFE7A3" stop-opacity="0.9"/>
+      <stop offset="0.55" stop-color="#FFC56B" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#FFC56B" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="trail" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F6C792"/>
+      <stop offset="1" stop-color="#D9935E"/>
+    </linearGradient>
+    <linearGradient id="metal" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#C7D2DF"/>
+      <stop offset="0.45" stop-color="#F2F6FA"/>
+      <stop offset="1" stop-color="#AEBBCB"/>
+    </linearGradient>
+    <linearGradient id="vest" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2CC6B4"/>
+      <stop offset="1" stop-color="#14968A"/>
+    </linearGradient>
+    <radialGradient id="bulb" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#FFF6C2"/>
+      <stop offset="0.5" stop-color="#FFE066"/>
+      <stop offset="1" stop-color="#FFE066" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- ciel et soleil -->
+  <rect width="640" height="640" fill="url(#sky)"/>
+  <circle cx="320" cy="236" r="200" fill="url(#sunGlow)"/>
+  <circle cx="320" cy="236" r="84" fill="#FFE29A"/>
+
+  <!-- montagnes -->
+  <path d="M0 360 L95 250 L165 310 L250 205 L320 280 L400 190 L480 290 L545 235 L640 330 L640 640 L0 640 Z" fill="#8A4F8F"/>
+  <path d="M250 205 L272 228 L258 232 L246 222 Z M400 190 L424 216 L408 220 L396 210 Z" fill="#F4D9E6" opacity="0.85"/>
+  <path d="M0 410 L120 330 L215 390 L320 335 L430 395 L540 340 L640 395 L640 640 L0 640 Z" fill="#5E3A78"/>
+  <path d="M0 470 Q160 420 320 445 T640 455 L640 640 L0 640 Z" fill="#3A2758"/>
+
+  <!-- sapins -->
+  <g fill="#271A40">
+    <path d="M60 470 L82 410 L104 470 Z M70 438 L82 395 L94 438 Z"/>
+    <path d="M110 478 L128 428 L146 478 Z"/>
+    <path d="M520 474 L540 416 L560 474 Z M530 442 L540 402 L550 442 Z"/>
+    <path d="M568 482 L584 440 L600 482 Z"/>
+  </g>
+
+  <!-- sentier -->
+  <path d="M232 640 C262 560 300 520 300 480 C300 455 312 445 320 440 C330 446 340 456 338 480 C336 520 380 560 420 640 Z" fill="url(#trail)"/>
+  <g fill="#B9764A" opacity="0.6">
+    <ellipse cx="282" cy="600" rx="9" ry="4"/>
+    <ellipse cx="372" cy="585" rx="7" ry="3"/>
+    <ellipse cx="318" cy="505" rx="5" ry="2"/>
+  </g>
+
+  <!-- ombre -->
+  <ellipse cx="318" cy="566" rx="58" ry="10" fill="#7A3E2E" opacity="0.35"/>
+
+  <!-- poussière -->
+  <g fill="#FBE3C4" opacity="0.85">
+    <circle cx="262" cy="556" r="8"/>
+    <circle cx="248" cy="548" r="5"/>
+    <circle cx="238" cy="560" r="4"/>
+  </g>
+
+  <!-- jambes -->
+  <g stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <!-- jambe d'appui -->
+    <path d="M304 418 L298 480 L300 540" stroke="#9FAEC0" stroke-width="22"/>
+    <!-- jambe d'impulsion, talon remonté -->
+    <path d="M338 418 L360 470 L384 450" stroke="#B9C6D5" stroke-width="22"/>
+  </g>
+  <!-- genoux -->
+  <circle cx="298" cy="480" r="9" fill="#7E8EA3"/>
+  <circle cx="360" cy="470" r="9" fill="#7E8EA3"/>
+
+  <!-- chaussures -->
+  <g>
+    <path d="M282 532 Q284 520 300 522 L314 526 Q324 530 322 544 Q321 556 306 556 L290 556 Q280 556 282 532 Z" fill="#FF7A3D"/>
+    <path d="M281 550 L322 550 Q322 560 306 561 L290 561 Q281 561 281 550 Z" fill="#2B2147"/>
+    <!-- semelle visible du pied arrière -->
+    <g transform="rotate(-28 392 446)">
+      <rect x="374" y="430" width="38" height="30" rx="12" fill="#FF7A3D"/>
+      <rect x="374" y="446" width="38" height="14" rx="7" fill="#2B2147"/>
+      <g stroke="#FF7A3D" stroke-width="3" stroke-linecap="round">
+        <path d="M382 451 L382 456 M390 451 L390 456 M398 451 L398 456 M406 451 L406 456"/>
+      </g>
+    </g>
+  </g>
+
+  <!-- short -->
+  <path d="M286 392 L356 392 L362 426 L326 430 L320 418 L314 430 L280 426 Z" fill="#2B2147"/>
+  <path d="M286 392 L356 392 L357 400 L285 400 Z" fill="#FF7A3D"/>
+
+  <!-- bras (derrière le buste) -->
+  <g stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <!-- bras gauche vers l'arrière, coude relevé -->
+    <path d="M286 330 L252 362 L246 330" stroke="#B9C6D5" stroke-width="18"/>
+    <!-- bras droit vers l'avant -->
+    <path d="M356 330 L382 372 L404 352" stroke="#9FAEC0" stroke-width="18"/>
+  </g>
+  <circle cx="246" cy="326" r="11" fill="#7E8EA3"/>
+  <circle cx="406" cy="350" r="11" fill="#7E8EA3"/>
+
+  <!-- buste -->
+  <rect x="280" y="306" width="82" height="94" rx="26" fill="url(#metal)"/>
+
+  <!-- gilet de trail -->
+  <path d="M284 316 Q321 300 358 316 L356 386 Q321 396 286 386 Z" fill="url(#vest)"/>
+  <!-- bretelles -->
+  <path d="M290 314 L296 304 M352 314 L346 304" stroke="#14968A" stroke-width="8" stroke-linecap="round"/>
+  <!-- filet de la poche -->
+  <g stroke="#0E7067" stroke-width="2" opacity="0.7">
+    <path d="M296 338 L346 338 M296 350 L346 350 M296 362 L346 362 M296 374 L346 374"/>
+    <path d="M306 332 L306 380 M321 330 L321 382 M336 332 L336 380"/>
+  </g>
+  <!-- écusson cœur -->
+  <circle cx="321" cy="327" r="13" fill="#FFF4E6"/>
+  <path d="M321 334 C311 327 312 319 317 319 C319.5 319 321 321 321 322.5 C321 321 322.5 319 325 319 C330 319 331 327 321 334 Z" fill="#FF4F6D"/>
+  <!-- flasques -->
+  <rect x="270" y="318" width="12" height="30" rx="5" fill="#8FE3F6" stroke="#14968A" stroke-width="2"/>
+  <rect x="360" y="318" width="12" height="30" rx="5" fill="#8FE3F6" stroke="#14968A" stroke-width="2"/>
+  <rect x="272" y="314" width="8" height="6" rx="2" fill="#FF7A3D"/>
+  <rect x="362" y="314" width="8" height="6" rx="2" fill="#FF7A3D"/>
+
+  <!-- cou -->
+  <rect x="309" y="292" width="24" height="18" rx="6" fill="#7E8EA3"/>
+
+  <!-- tête (vue de dos) -->
+  <rect x="272" y="212" width="98" height="86" rx="32" fill="url(#metal)"/>
+  <!-- oreilles / boulons -->
+  <circle cx="270" cy="258" r="11" fill="#7E8EA3"/>
+  <circle cx="372" cy="258" r="11" fill="#7E8EA3"/>
+  <circle cx="270" cy="258" r="4" fill="#5C6B80"/>
+  <circle cx="372" cy="258" r="4" fill="#5C6B80"/>
+  <!-- grille arrière (haut-parleur) -->
+  <g stroke="#9AA8BA" stroke-width="3" stroke-linecap="round">
+    <path d="M306 270 L336 270 M302 280 L340 280"/>
+  </g>
+
+  <!-- casquette à l'envers -->
+  <path d="M276 236 Q278 196 321 194 Q364 196 366 236 Q321 226 276 236 Z" fill="#FF7A3D"/>
+  <!-- visière (vers l'arrière, donc vers nous) -->
+  <path d="M292 236 Q321 230 350 236 L346 254 Q321 262 296 254 Z" fill="#E85F26"/>
+  <!-- ouverture et réglage de la casquette -->
+  <path d="M306 236 Q321 218 336 236" fill="#2B2147"/>
+  <rect x="311" y="231" width="20" height="5" rx="2" fill="#FFE066"/>
+
+  <!-- antenne -->
+  <path d="M321 196 L321 166" stroke="#7E8EA3" stroke-width="5" stroke-linecap="round"/>
+  <circle cx="321" cy="160" r="26" fill="url(#bulb)"/>
+  <circle cx="321" cy="160" r="9" fill="#FFE066"/>
+  <circle cx="318" cy="157" r="3" fill="#FFFFFF"/>
+
+  <!-- traits de vitesse -->
+  <g stroke="#FFF2DD" stroke-width="5" stroke-linecap="round" opacity="0.8">
+    <path d="M196 300 L226 300 M186 322 L222 322 M200 344 L226 344"/>
+  </g>
+</svg>
