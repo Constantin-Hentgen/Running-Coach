@@ -54,6 +54,9 @@ REVIEW_PROMPT = (
 )
 
 APPLY_PROMPT = "Applique maintenant cette proposition que tu m'as faite et que je valide : {text}"
+DEBRIEF_TIMEOUT_S = 300   # au-delà, récap brut : un débrief bloqué ne doit jamais empêcher les vérifications suivantes
+# État de la dernière vérification Dreeve, exposé par /health pour diagnostiquer un débrief manquant.
+ACTIVITY_STATUS: dict = {"checked_at": None, "result": None, "error": None, "debriefed_at": None}
 MESSAGE_DEBOUNCE_S = 4.0   # silence attendu avant de répondre, pour regrouper les messages envoyés à la suite
 
 
@@ -80,22 +83,25 @@ async def send_text(send, text: str, reply_markup=None) -> None:
             await send(md_unescape(chunk), **extra)
 
 
-def proposals_markup(proposals: list[tuple[int, str]]) -> tuple[str, InlineKeyboardMarkup | None]:
-    """Pied de message listant les propositions (texte généré par le code) + boutons."""
-    if not proposals:
-        return "", None
-    if len(proposals) == 1:
-        pid, text = proposals[0]
-        footer = f"*💡 Proposition* : {md_escape(text)}"
-        rows = [[InlineKeyboardButton("✅ Appliquer", callback_data=f"p:a:{pid}"),
-                 InlineKeyboardButton("✏️ Ajuster", callback_data=f"p:e:{pid}"),
-                 InlineKeyboardButton("❌ Ignorer", callback_data=f"p:x:{pid}")]]
-        return footer, InlineKeyboardMarkup(rows)
-    lines = ["*💡 Propositions*"] + [f"{i}. {md_escape(text)}" for i, (_, text) in enumerate(proposals, 1)]
-    rows = [[InlineKeyboardButton(f"✅ {i}", callback_data=f"p:a:{pid}"),
-             InlineKeyboardButton(f"✏️ {i}", callback_data=f"p:e:{pid}"),
-             InlineKeyboardButton(f"❌ {i}", callback_data=f"p:x:{pid}")] for i, (pid, _) in enumerate(proposals, 1)]
-    return "\n".join(lines), InlineKeyboardMarkup(rows)
+def proposal_bubble(summary: str) -> str:
+    return f"💡 {md_escape(summary)}"
+
+
+def proposal_markup(pid) -> InlineKeyboardMarkup:
+    """Une proposition = une bulle à part, avec ses propres boutons : répondre à l'une ne touche pas aux autres."""
+    return InlineKeyboardMarkup([[InlineKeyboardButton("✅ Oui, vas-y", callback_data=f"p:a:{pid}"),
+                                  InlineKeyboardButton("✏️ Modifier", callback_data=f"p:e:{pid}"),
+                                  InlineKeyboardButton("❌ Non", callback_data=f"p:x:{pid}")]])
+
+
+PROPOSAL_OUTCOME = {"a": "✅ C'est parti.", "e": "✏️ À modifier : dis-moi quoi.", "x": "❌ On garde le programme tel quel."}
+
+
+def without_proposal(markup: InlineKeyboardMarkup | None, pid: str) -> InlineKeyboardMarkup | None:
+    """Clavier sans la ligne de cette proposition (anciens messages à plusieurs propositions)."""
+    rows = [list(row) for row in (markup.inline_keyboard if markup else ())
+            if not any((b.callback_data or "").startswith("p:") and b.callback_data.split(":")[2] == str(pid) for b in row)]
+    return InlineKeyboardMarkup(rows) if rows else None
 
 
 MEAL_HINT = "_Touche un plat une fois mangé ou cuisiné : ses ingrédients sortent du stock._"
@@ -195,13 +201,15 @@ class CoachBot:
         await send_text(self._sender(), text, reply_markup)
 
     async def _deliver(self, reply: agent.AgentReply, header: str = "", update: Update | None = None) -> None:
-        """Réponse de l'agent + propositions (pied de message et boutons)."""
-        footer, markup = proposals_markup(reply.proposals)
+        """Réponse de l'agent, puis chaque proposition dans sa propre bulle avec ses boutons."""
+        footer, markup = "", None
         if reply.meals:
-            footer = "\n\n".join(part for part in (footer, meal_hint(reply.meals)) if part)
-            markup = InlineKeyboardMarkup([*(markup.inline_keyboard if markup else ()), *meal_rows(reply.meals)])
+            footer, markup = meal_hint(reply.meals), InlineKeyboardMarkup(meal_rows(reply.meals))
         text = "\n\n".join(part for part in (header, reply.text, footer) if part)
-        await send_text(self._sender(update), text, markup)
+        if text:
+            await send_text(self._sender(update), text, markup)
+        for pid, summary in reply.proposals:
+            await send_text(self._sender(update), proposal_bubble(summary), proposal_markup(pid))
         if reply.shopping_list is not None and (lst := store.shopping_list) and lst["id"] == reply.shopping_list:
             await send_text(self._sender(update), shopping_text(lst), shopping_markup(lst))
 
@@ -474,18 +482,25 @@ class CoachBot:
             await query.answer("Déjà traité.")
             return
         await query.answer()
-        await query.edit_message_reply_markup(None)   # plus de double clic possible
+        remaining = without_proposal(query.message.reply_markup, pid)
+        if remaining is None and item["kind"] != "weather":   # sa propre bulle : elle garde la trace du choix
+            await query.edit_message_text(f"{proposal_bubble(item.get('summary') or item['text'])}\n{PROPOSAL_OUTCOME[action]}",
+                                          parse_mode=ParseMode.MARKDOWN)
+        else:   # seuls ses boutons partent : les autres propositions du message restent utilisables
+            await query.edit_message_reply_markup(remaining)
         if action == "a":
             prompt = item["text"] if item["kind"] == "weather" else APPLY_PROMPT.format(text=item["text"])
             await self._ask_and_reply(update, prompt)
         elif action == "e":
             await agent.add_to_history(self.chat_id, f"[L'athlète veut ajuster ta proposition : {item['text']}]",
                                        "Dis-moi ce que tu veux changer.")
-            await self._push("✏️ Dis-moi ce que tu veux changer (texte ou vocal), je m'adapte.")
+            if item["kind"] == "weather":
+                await self._push("✏️ Dis-moi ce que tu veux changer (texte ou vocal), je m'adapte.")
         else:
             await agent.add_to_history(self.chat_id, f"[L'athlète a ignoré ta proposition : {item['text']}]",
                                        "D'accord, on garde le programme tel quel.")
-            await self._push("👍 On garde le programme tel quel.")
+            if item["kind"] == "weather":
+                await self._push("👍 On garde le programme tel quel.")
 
     async def _on_meal(self, update: Update, mid: str) -> None:
         """Plat mangé / cuisiné : ses ingrédients sortent du stock (ou passent à ce qu'il en reste)."""
@@ -728,19 +743,26 @@ class CoachBot:
         """Débriefe chaque run apparu dans Dreeve depuis le dernier vu, puis demande le ressenti.
         Retourne True si un run a été trouvé."""
         async with self._activity_lock:
+            ACTIVITY_STATUS.update(checked_at=datetime.datetime.now(TZ).isoformat(timespec="seconds"), error=None)
             try:
                 runs = await asyncio.to_thread(dreeve.get_recent_runs)
             except Exception as e:
                 logger.error(f"Erreur vérification Dreeve ({source}) : {e}")
+                ACTIVITY_STATUS.update(result="erreur Dreeve", error=str(e))
                 return False
             if not runs:
+                ACTIVITY_STATUS["result"] = "aucun run"
                 return False
             previous = store.last_activity_id   # persistant : un run importé pendant un redémarrage n'est pas perdu
             fresh = dreeve.new_runs_since(runs, previous)
             if not fresh:
+                ACTIVITY_STATUS["result"] = f"rien de nouveau (dernier vu : {previous})"
+                logger.debug(f"Dreeve ({source}) : rien de nouveau (dernier vu : {previous})")
                 return False
             if previous is None:   # tout premier passage : simple référence, pas de notification
                 store.last_activity_id = runs[0].get("id")
+                ACTIVITY_STATUS["result"] = f"référence initiale : {runs[0].get('id')}"
+                logger.info(f"Dreeve : référence initiale {runs[0].get('id')} (pas de débrief)")
                 return False
 
             logger.info(f"{len(fresh)} nouveau(x) run(s) détecté(s) ({source}) : {[r.get('id') for r in fresh]}")
@@ -748,17 +770,21 @@ class CoachBot:
             runs_text = "\n".join(dreeve.format_activity(r) for r in fresh)
             prompt = DEBRIEF_PROMPT.format(intro=f"Je viens de terminer et d'uploader {what}", runs=runs_text)
             try:
-                reply = await agent.ask(prompt, chat_id=self.chat_id, allow_writes=False)
-            except Exception:   # l'agent ne doit pas faire perdre le récap : on envoie au moins les chiffres
+                reply = await asyncio.wait_for(agent.ask(prompt, chat_id=self.chat_id, allow_writes=False), DEBRIEF_TIMEOUT_S)
+            except Exception:   # l'agent (en échec ou bloqué) ne doit pas faire perdre le récap : au moins les chiffres
                 logger.exception("Débrief de séance : agent en échec, envoi du récap brut")
                 reply = agent.AgentReply(f"{runs_text}\n\n_(Analyse du coach indisponible, demande /debrief pour réessayer.)_")
             try:
                 await self._deliver(reply, header="⚡ *Nouveau run détecté !*")
-            except Exception:   # run non marqué comme vu : nouvel essai au prochain passage
+            except Exception as e:   # run non marqué comme vu : nouvel essai au prochain passage
                 logger.exception("Débrief de séance : envoi Telegram en échec, nouvel essai au prochain passage")
+                ACTIVITY_STATUS.update(result="envoi Telegram en échec", error=str(e))
                 return False
             # marqué comme vu seulement une fois le récap livré, pour qu'un échec ne fasse pas perdre le run
             store.last_activity_id = runs[0].get("id")
+            ACTIVITY_STATUS.update(result=f"débrief envoyé : {runs[0].get('id')}",
+                                   debriefed_at=datetime.datetime.now(TZ).isoformat(timespec="seconds"))
+            logger.info(f"Débrief de séance envoyé ({runs[0].get('id')})")
             try:
                 await self._ask_checkin(fresh[-1])
             except Exception:

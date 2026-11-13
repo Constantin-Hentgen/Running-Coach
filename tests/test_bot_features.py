@@ -210,13 +210,14 @@ def test_proposal_buttons_apply_once(tmp_path, monkeypatch):
     b, store = _bot(tmp_path, monkeypatch, asked=asked, proposals=["Déplacer le fractionné de mardi à mercredi 18:30"])
     reply = asyncio.run(bot_module.agent.ask("debrief", "42", allow_writes=False))
     asyncio.run(b._deliver(reply, header="⚡ *Nouveau run détecté !*"))
-    text, markup = b.sent[-1]
-    assert "*💡 Proposition* : Déplacer le fractionné" in text
+    (debrief, no_buttons), (text, markup) = b.sent   # le débrief, puis la proposition dans sa propre bulle
+    assert debrief.startswith("⚡") and no_buttons is None and "💡" not in debrief
+    assert text.strip() == "💡 Déplacer le fractionné de mardi à mercredi 18:30"
     (pid,) = {data.split(":")[2] for _, data in _buttons(markup)}
-    assert [label for label, _ in _buttons(markup)] == ["✅ Appliquer", "✏️ Ajuster", "❌ Ignorer"]
+    assert [label for label, _ in _buttons(markup)] == ["✅ Oui, vas-y", "✏️ Modifier", "❌ Non"]
 
-    q = _click(b, f"p:a:{pid}")
-    assert ("markup", None) in q.edits                         # boutons retirés
+    q = _click(b, f"p:a:{pid}", markup)
+    assert q.edits == [("💡 Déplacer le fractionné de mardi à mercredi 18:30\n✅ C'est parti.", None)]   # choix affiché, plus de boutons
     prompt, allow_writes = asked[-1]
     assert allow_writes is True and "Déplacer le fractionné de mardi à mercredi 18:30" in prompt
     n = len(asked)
@@ -227,8 +228,8 @@ def test_proposal_ignore_and_weather_adapt(tmp_path, monkeypatch):
     asked = []
     b, store = _bot(tmp_path, monkeypatch, asked=asked)
     pid = store.add_proposal("Décale la sortie longue")
-    _click(b, f"p:x:{pid}")
-    assert store.proposal(pid)["status"] == "ignored" and not asked and "On garde" in b.sent[-1][0]
+    q = _click(b, f"p:x:{pid}", bot_module.proposal_markup(pid))
+    assert store.proposal(pid)["status"] == "ignored" and not asked and "On garde" in q.edits[-1][0]
     wid = store.add_proposal("Alerte météo sur ma séance … Adapte-la au mieux", kind="weather")
     _click(b, f"p:a:{wid}")
     assert asked[-1][0] == "Alerte météo sur ma séance … Adapte-la au mieux"   # le texte EST la demande
@@ -950,3 +951,40 @@ def test_messages_sent_in_a_row_get_one_reply(tmp_path, monkeypatch):
     (prompt, _), = asked
     assert "à traiter ensemble" in prompt and "1. fais toutes les modifs" in prompt and "2. et une semaine" in prompt
     assert bot_module.merge_messages(["seul"]) == "seul"
+
+
+
+def test_each_proposal_has_its_own_bubble_and_answering_one_keeps_the_other(tmp_path, monkeypatch):
+    b, store = _bot(tmp_path, monkeypatch, proposals=["On passe jeudi à 6,5 km ?", "On retire le dimanche ?"])
+    reply = asyncio.run(bot_module.agent.ask("x", "42"))
+    asyncio.run(b._deliver(reply))
+    assert [t.strip() for t, _ in b.sent] == ["débrief", "💡 On passe jeudi à 6,5 km ?", "💡 On retire le dimanche ?"]
+    (p1, m1), (p2, m2) = [(int(_buttons(m)[0][1].split(":")[2]), m) for _, m in b.sent[1:]]
+    _click(b, f"p:x:{p1}", m1)
+    assert store.proposal(p1)["status"] == "ignored" and store.proposal(p2)["status"] == "open"
+    assert _click(b, f"p:x:{p2}", m2).answers == [None]                       # la seconde répond toujours
+
+
+def test_old_message_with_two_proposals_only_loses_the_answered_row(tmp_path, monkeypatch):
+    b, store = _bot(tmp_path, monkeypatch)
+    p1, p2 = store.add_proposal("a", summary="A ?"), store.add_proposal("b", summary="B ?")
+    old = bot_module.InlineKeyboardMarkup([*bot_module.proposal_markup(p1).inline_keyboard,
+                                           *bot_module.proposal_markup(p2).inline_keyboard])
+    q = _click(b, f"p:x:{p1}", old)
+    (kind, markup), = q.edits
+    assert kind == "markup" and {d.split(":")[2] for _, d in _buttons(markup)} == {str(p2)}
+
+
+def test_debrief_that_hangs_falls_back_to_raw_stats(tmp_path, monkeypatch):
+    runs = [_run(1)]
+    b, store = _bot(tmp_path, monkeypatch, runs)
+    store.last_activity_id = 0
+
+    async def hang(*args, **kwargs):
+        await asyncio.sleep(3600)
+
+    monkeypatch.setattr(bot_module.agent, "ask", hang)
+    monkeypatch.setattr(bot_module, "DEBRIEF_TIMEOUT_S", 0.01)
+    assert asyncio.run(b.check_new_activity()) is True
+    assert "Run 1" in b.sent[0][0] and "indisponible" in b.sent[0][0]
+    assert store.last_activity_id == 1 and bot_module.ACTIVITY_STATUS["result"] == "débrief envoyé : 1"

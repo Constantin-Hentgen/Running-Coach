@@ -423,16 +423,17 @@ PROPOSE_TOOL = {
     "name": "propose_change",
     "description": (
         "Enregistre un changement de l'agenda d'ENTRAÎNEMENT que tu PROPOSES sans le faire (débrief, bilan, alerte météo, ou "
-        "quand tu demandes confirmation). Jamais pour la liste de courses ni le stock : ceux-là, fais-les directement. L'athlète verra des boutons Appliquer / Ajuster / Ignorer : s'il clique Appliquer, ce texte te sera "
+        "quand tu demandes confirmation). Jamais pour la liste de courses ni le stock : ceux-là, fais-les directement. L'athlète la voit dans sa propre bulle avec les boutons Oui / Modifier / Non : s'il dit Oui, ce texte te sera "
         "renvoyé pour exécution, il doit donc être autonome, précis et complet (séances, dates, heures, contenus, UID). "
-        "Seul `summary` est montré à l'athlète. Une proposition par appel ; n'en fais pas pour un simple conseil sans "
-        "changement d'agenda."
+        "Seul `summary` est montré à l'athlète. Une proposition par appel, et regroupe les changements liés (toute une "
+        "semaine, une même idée) en une seule ; au plus 2 propositions par réponse. N'en fais pas pour un simple conseil "
+        "sans changement d'agenda."
     ),
     "input_schema": {
         "type": "object",
         "properties": {
-            "summary": {"type": "string", "description": "ce que voit l'athlète : une ligne courte en langage courant, "
-                        "sans UID ni horaires détaillés, ex: « Fractionné de mardi décalé à mercredi soir »"},
+            "summary": {"type": "string", "description": "ce que voit l'athlète : une question courte en langage courant, "
+                        "à laquelle on répond oui ou non, sans UID ni horaires détaillés, ex: « On décale le fractionné de mardi à mercredi soir ? »"},
             "change": {"type": "string", "description": "le détail complet pour l'exécution, ex: « Déplacer le "
                        "fractionné du mar 10/11 18:30 (UID …) au mer 11/11 18:30, même contenu »"},
         },

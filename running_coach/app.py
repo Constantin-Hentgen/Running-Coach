@@ -110,5 +110,9 @@ app = FastAPI(lifespan=lifespan)
 
 @app.get("/health")
 def health_check():
-    return {"status": "running", "telegram": getattr(app.state, "telegram_running", False)}
+    from .bot import ACTIVITY_STATUS
+    from .memory import store
+    activity = dict(ACTIVITY_STATUS, poll_minutes=settings.activity_poll_minutes,
+                    dreeve_enabled=settings.dreeve_enabled, last_activity_id=store.last_activity_id)
+    return {"status": "running", "telegram": getattr(app.state, "telegram_running", False), "activity": activity}
 
