@@ -164,6 +164,7 @@ class Settings:
     briefing_time: tuple[int, int] | None
     weekly_review: tuple[int, int, int] | None
     pantry_check_time: tuple[int, int] | None
+    shop_last_call: tuple[int, int] | None
     meal_check_times: list[tuple[int, int]]
     eat_suggest_times: list[tuple[int, int]]
     meal_boxes: int
@@ -214,6 +215,7 @@ class Settings:
             briefing_time=_briefing_time(_str("BRIEFING_TIME", "08:00")),
             weekly_review=_weekly_time(_str("WEEKLY_REVIEW_TIME", "sun 19:00")),
             pantry_check_time=_briefing_time(_str("PANTRY_CHECK_TIME", "18:00"), "PANTRY_CHECK_TIME"),
+            shop_last_call=_briefing_time(_str("SHOP_LAST_CALL", "19:30"), "SHOP_LAST_CALL"),
             meal_check_times=_meal_times(_str("MEAL_CHECK_TIMES", "10:30,14:30,21:30")),
             eat_suggest_times=_meal_times(_str("EAT_SUGGEST_TIMES", "07:00,11:30,18:30"), "EAT_SUGGEST_TIMES"),
             meal_boxes=max(1, _int("MEAL_BOXES", 3)),

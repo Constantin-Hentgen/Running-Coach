@@ -171,6 +171,9 @@ def _uses(args: dict) -> list[dict]:
     return uses
 
 
+MEAL_MOODS = ("express", "chill", "gourmand")
+
+
 def tool_propose_meal(args: dict, ledger: Ledger) -> dict:
     title = " ".join((args.get("title") or "").split())[:80]
     if not title:
@@ -183,7 +186,8 @@ def tool_propose_meal(args: dict, ledger: Ledger) -> dict:
     if makes and box_count(makes) > settings.meal_boxes:
         raise ValueError(f"l'athlète n'a que {settings.meal_boxes} boîtes : prévois-en {settings.meal_boxes} au plus "
                          "(ou une autre session de cuisine)")
-    pid = store.add_proposal(title, kind="meal", uses=uses, makes=makes, recipe=recipe,
+    mood = args.get("mood") if args.get("mood") in MEAL_MOODS else None
+    pid = store.add_proposal(title, kind="meal", uses=uses, makes=makes, recipe=recipe, mood=mood,
                              macros={k: args.get(k) for k in ("kcal", "protein_g", "carbs_g")})
     ledger.record("meal", title, True, detail=str(pid))
     note = ("Un bouton « choisir » est affiché sous ta réponse : la recette sera envoyée quand l'athlète choisira ce plat, "
@@ -553,13 +557,17 @@ MEAL_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "title": {"type": "string", "description": "nom court du plat, ex: « Bowl saumon riz »"},
+            "title": {"type": "string", "description": "nom court du plat, qui commence par UN émoji qui le symbolise, "
+                      "ex: « 🍝 Pâtes au thon », « 🌮 Tortilla », « 🥗 Bowl saumon riz »"},
             "recipe": {"type": "string", "description": "/eat : la recette complète, envoyée seulement quand l'athlète "
-                       "choisit ce plat (bouton « choisir ») : ingrédients avec quantités (🥫 du stock / 🛒 à acheter), puis "
-                       "3 à 6 étapes courtes numérotées ; format Telegram concis. À omettre pour /recipes."},
+                       "choisit ce plat (bouton « choisir ») : ingrédients avec quantités, chacun précédé de son émoji (🌽 maïs, "
+                       "🥚 œufs, 🧀 fromage, 🍅 tomates, 🧅 oignon…) et marqué 🛒 s'il faut l'acheter, puis 3 à 6 "
+                       "étapes courtes numérotées ; format Telegram concis. À omettre pour /recipes."},
             "makes": {"type": "string", "description": "batch cooking seulement (cuisiné pour plus tard, pas mangé tout "
                       "de suite) : nombre de boîtes, ex: « 2 boîtes » (pas plus que les boîtes libres au moment de cuisiner) ; "
                       "le plat entre alors au stock"},
+            "mood": {"type": "string", "enum": ["express", "chill", "gourmand"],
+                     "description": "/eat : l'envie à laquelle ce plat répond (un plat par envie)"},
             "kcal": {"type": "integer", "description": "estimation pour une portion"},
             "protein_g": {"type": "integer"},
             "carbs_g": {"type": "integer"},

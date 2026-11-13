@@ -683,7 +683,7 @@ def test_eat_choice_sends_the_recipe_updates_stock_and_drops_other_dishes(tmp_pa
     omelette = tools.tool_propose_meal({"title": "Omelette", "recipe": "🛒 Œufs\n1. Battre", "uses": []}, ledger)["meal_id"]
     asyncio.run(b._deliver(agent.AgentReply("Deux idées", meals=[(pasta, "Pâtes au thon"), (omelette, "Omelette")])))
     text, markup = b.sent[-1]
-    assert "Choisis ton plat" in text and "Cuire" not in text                 # recette envoyée au choix seulement
+    assert "Ça te dit quoi" in text and "Cuire" not in text                 # recette envoyée au choix seulement
     assert _buttons(markup) == [("🍽️ Pâtes au thon", f"m:{pasta}"), ("🍽️ Omelette", f"m:{omelette}")]
 
     q = _click(b, f"m:{pasta}", markup)
@@ -1078,7 +1078,7 @@ def test_meal_suggestion_before_eating_and_when_it_stays_quiet(tmp_path, monkeyp
     assert "[Suggestion automatique avant le repas]" in prompt and "bureau" in prompt and "question" in prompt
     assert allow_writes is False and marker == bot_module.commands.NO_SUGGESTION
     (text, no_buttons), (hint, markup) = b.sent[-2:]   # sa phrase, puis les plats avec leurs boutons
-    assert text.startswith("Pour ce midi") and no_buttons is None and "Choisis" in hint
+    assert text.startswith("Pour ce midi") and no_buttons is None and "Ça te dit quoi" in hint
     assert [l for l, _ in _buttons(markup)] == ["🍽️ Omelette"]
 
     asyncio.run(b.suggest_meal())                       # dishes just offered (as after /eat): no second message
@@ -1205,3 +1205,47 @@ def test_never_more_than_four_messages_in_a_row(tmp_path, monkeypatch):
     pids = [(store.add_proposal(t, summary=t), t) for t in ("On décale jeudi ?", "On retire dimanche ?")]
     asyncio.run(b._deliver(agent.AgentReply(six, pids)))
     assert len(b.sent) == 4 and [t for t, _ in b.sent[2:]] == ["💡 On décale jeudi ?\n", "💡 On retire dimanche ?\n"]
+
+
+
+def test_eat_three_moods_on_buttons_and_reshown_instead_of_rechosen(tmp_path, monkeypatch):
+    b, store = _bot(tmp_path, monkeypatch)
+    asked = []
+
+    async def fake_ask(prompt, chat_id, allow_writes=True, planning=False, skip_marker=None):
+        asked.append(prompt)
+        ids = [(store.add_proposal(t, kind="meal", uses=[], recipe="1. Cuire", mood=m), t)
+               for t, m in (("🍝 Pâtes crème", "gourmand"), ("🥪 Wrap thon", "express"), ("🍲 Lentilles", "chill"))]
+        return agent.AgentReply("Ce soir 👇", meals=ids)
+
+    monkeypatch.setattr(bot_module.agent, "ask", fake_ask)
+    update = NS(message=NS(), effective_message=None, effective_chat=NS(id=42, send_action=_noop))
+
+    async def authorized(u):
+        return True
+
+    b._authorized = authorized
+    asyncio.run(b.on_eat(update, None))
+    assert "⚡ express" in asked[-1] and "😌 chill" in asked[-1] and "🤤 gourmand" in asked[-1]
+    assert "émoji" in asked[-1] and "meilleur" in asked[-1]                    # never picks for me
+    labels = [l for l, _ in _buttons(b.sent[-1][1])]
+    assert labels == ["⚡ 🥪 Wrap thon", "😌 🍲 Lentilles", "🤤 🍝 Pâtes crème"]   # mood order, dish emoji kept
+
+    asyncio.run(b.on_eat(update, None))                                       # /eat again: same options, no AI call
+    assert len(asked) == 1 and b.sent[-1][0].startswith("Tes options de tout à l'heure")
+    again = _buttons(b.sent[-1][1])
+    assert [l for l, _ in again][-1] == "🔄 Autre chose"
+    _click(b, "e:n", b.sent[-1][1])                                           # something else: new ideas
+    assert len(asked) == 2 and "d'autres idées" in asked[-1]
+    assert all(store.proposal(int(d[2:]))["status"] == "ignored" for _, d in again if d.startswith("m:"))
+
+
+def test_after_shop_last_call_only_stock(monkeypatch):
+    import dataclasses
+    from running_coach import commands
+    monkeypatch.setattr(commands, "settings", dataclasses.replace(commands.settings, shop_last_call=(19, 30)))
+    tz = bot_module.TZ
+    assert "acheter un ou deux trucs" in commands.eat_prompt(datetime.datetime(2026, 11, 13, 18, 0, tzinfo=tz))
+    late = commands.eat_prompt(datetime.datetime(2026, 11, 13, 20, 30, tzinfo=tz))
+    assert "magasins sont fermés" in late and "acheter un ou deux" not in late
+    assert "magasins sont fermés" in commands.eat_prompt(datetime.datetime(2026, 11, 14, 6, 30, tzinfo=tz))

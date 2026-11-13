@@ -5,7 +5,7 @@ from itertools import groupby
 from telegram import BotCommand
 
 from .coaching import format_goals, format_pantry
-from .config import FR_DAYS
+from .config import FR_DAYS, settings
 from .dreeve import format_activity, weekly_volume
 from .formatting import md_escape
 
@@ -75,6 +75,13 @@ def parse_days(args: list[str], default: int = AGENDA_DEFAULT_DAYS, maximum: int
 NO_SUGGESTION = "PAS_DE_SUGGESTION"
 
 
+def shops_open(now: datetime.datetime) -> bool:
+    """Encore le temps d'aller acheter quelque chose (SHOP_LAST_CALL, « off » = toujours ; la nuit, jamais)."""
+    if not settings.shop_last_call:
+        return True
+    return datetime.time(7, 0) <= now.time() < datetime.time(*settings.shop_last_call)
+
+
 def eat_prompt(now: datetime.datetime, spontaneous: bool = False) -> str:
     if spontaneous:   # envoyé par le système juste avant un repas, sans demande de l'athlète
         intro = (
@@ -95,13 +102,19 @@ def eat_prompt(now: datetime.datetime, spontaneous: bool = False) -> str:
            "Si une information change vraiment la réponse et que tu ne peux pas la déduire (combien de temps j'ai, si je "
            "mange seul, si un produit frais ancien est encore là…), pose-moi d'abord une ou deux questions courtes et "
            "arrête-toi là. Sinon, ") +
-        "propose-moi 2 ou 3 plats variés au choix (dont un express si possible ; une boîte prête au "
-        "stock en premier). Pense efficacité : un plat qui se cuisine en plus grande quantité pour remplir mes boîtes "
-        "libres (contexte) pour les prochains jours est un bon choix, en restant varié avec ce qui est déjà en boîtes. "
-        "Format : très court, une ligne par plat, rien d'autre :\n"
-        "🍽️ *Le plat* · ⏱️ temps · 🛒 ce qu'il faut acheter (rien si tout est en stock), et quelques mots sur pourquoi "
-        "seulement si c'est vraiment parlant (« avant ta sortie longue »).\n"
-        "Pas de recette dans ton message : pour chaque plat, appelle propose_meal avec `recipe` (ingrédients avec "
+        "propose-moi exactement 3 plats, un par envie, et laisse-moi choisir (ne dis jamais lequel est le meilleur, "
+        "sauf si je te le demande) :\n"
+        "- ⚡ express : prêt en 15 min max, zéro prise de tête (une boîte prête du stock passe en premier ici) ;\n"
+        "- 😌 chill : simple et réconfortant, 20 à 40 min tranquille ;\n"
+        "- 🤤 gourmand : le plat plaisir, un peu plus d'effort.\n"
+        "Pense efficacité : un plat qui se cuisine en plus grande quantité pour remplir mes boîtes libres (contexte) est "
+        "un bon choix, en restant varié avec ce qui est déjà en boîtes. "
+        + ("Je peux encore passer acheter un ou deux trucs si ça vaut le coup. " if shops_open(now) else
+           "Les magasins sont fermés : uniquement des plats faisables avec ce qu'il y a en stock, rien à acheter. ") +
+        "Mets un maximum d'émojis pour que je me projette : chaque plat commence par un émoji qui le symbolise, et ses "
+        "ingrédients principaux ont le leur. Format : une courte phrase d'intro, puis une ligne par plat, rien d'autre :\n"
+        "⚡ 🌮 *Le plat* · 🥚🥔🧀 · ⏱️ temps (· 🛒 ce qu'il faut acheter, seulement s'il manque quelque chose)\n"
+        "Pas de recette dans ton message : pour chaque plat, appelle propose_meal avec `mood`, `recipe` (ingrédients avec "
         "quantités pour le repas + les boîtes à remplir, 3 à 6 étapes courtes, et combien de boîtes mettre de côté), les "
         "ingrédients du stock qu'il consomme (`uses`) et ses estimations (kcal, protéines, glucides). J'aurai un bouton "
         "par plat : quand je choisis, je reçois sa recette, ses ingrédients sortent du stock et le repas est noté. "

@@ -173,6 +173,7 @@ The `RAIN_ALERT_*` variables keep their historical names but drive all weather a
 | `BRIEFING_TIME` | `08:00` | Briefing time; `off` = disabled |
 | `WEEKLY_REVIEW_TIME` | `sun 19:00` | Weekly review day (`mon`…`sun`) and time; `off` = disabled (`/review` still works) |
 | `GIPHY_API_KEY` | *(empty)* | Free GIPHY API key ([developers.giphy.com](https://developers.giphy.com)). With it, Bob now and then adds a funny GIF or meme, only to open a conversation (before his first message of a session) or to close one (after his last): at most one per chat session (a session ends after 90 min of silence), only when it illustrates what he says, never on a serious topic. Empty = no GIFs |
+| `SHOP_LAST_CALL` | `19:30` | After this time (until 7:00) `/eat` and meal suggestions only use what's in stock, nothing to buy (your shop is about to close); `off` = shopping always possible |
 | `EAT_SUGGEST_TIMES` | `07:00,11:30,18:30` | When to suggest dishes on its own, like `/eat`, just before each meal. Skipped when the coach knows the meal is eaten elsewhere (lunch on office days, from its memory and the calendar), when `/eat` was just asked, or when the meal is already logged; `off` = never |
 | `MEAL_CHECK_TIMES` | `10:30,14:30,21:30` | When to ask « Qu'as-tu mangé ? » (about an hour after each meal), only if no meal was logged since the previous question (5 h at most); `off` = never |
 | `MEAL_BOXES` | `3` | How many meal-prep boxes (tups) you own: the coach plans batch cooking to fill the free ones, never more |

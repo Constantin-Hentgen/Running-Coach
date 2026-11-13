@@ -113,10 +113,10 @@ def without_proposal(markup: InlineKeyboardMarkup | None, pid: str) -> InlineKey
     return InlineKeyboardMarkup(rows) if rows else None
 
 
-MEAL_HINT = "_Touche un plat une fois mangé ou cuisiné : ses ingrédients sortent du stock._"
+MEAL_HINT = "Touche un plat une fois mangé ou cuisiné 👇"
 
 
-CHOOSE_HINT = "_Choisis ton plat : je t'envoie la recette et je retire ses ingrédients du stock._"
+CHOOSE_HINT = "Ça te dit quoi ? 👇"
 
 
 def has_recipe(mid) -> bool:
@@ -127,8 +127,29 @@ def has_recipe(mid) -> bool:
 def meal_rows(meals: list[tuple[int, str]]) -> list[list[InlineKeyboardButton]]:
     """Un bouton par plat proposé : « choisir » (/eat, envoie la recette) ou « mangé / cuisiné » ; retire ses
     ingrédients du stock, sans IA."""
-    return [[InlineKeyboardButton(f"{'🍽️' if has_recipe(mid) else '✅'} {title}"[:60], callback_data=f"m:{mid}")]
-            for mid, title in meals]
+    def icon(mid) -> str:
+        item = store.proposal(mid) or {}
+        return MOOD_ICON.get(item.get("mood")) or ("🍽️" if has_recipe(mid) else "✅")
+
+    def order(meal) -> int:
+        mood = (store.proposal(meal[0]) or {}).get("mood")
+        return list(MOOD_ICON).index(mood) if mood in MOOD_ICON else len(MOOD_ICON)
+
+    return [[InlineKeyboardButton(f"{icon(mid)} {title}"[:60], callback_data=f"m:{mid}")]
+            for mid, title in sorted(meals, key=order)]
+
+
+MOOD_ICON = {"express": "⚡", "chill": "😌", "gourmand": "🤤"}   # /eat : un plat par envie, dans cet ordre
+EAT_REPEAT_HOURS = 2   # /eat redemandé avant : on remontre les mêmes plats plutôt que d'en inventer d'autres
+
+
+def recent_eat_options(now: datetime.datetime) -> list[tuple[int, str]]:
+    """Plats /eat encore ouverts proposés il y a moins de EAT_REPEAT_HOURS heures, du plus récent lot."""
+    cutoff = now - datetime.timedelta(hours=EAT_REPEAT_HOURS)
+    items = [(int(pid), item) for pid, item in store.state["proposals"].items()
+             if item.get("kind") == "meal" and item.get("recipe") and item["status"] == "open"
+             and datetime.datetime.fromisoformat(item["created"]) > cutoff]
+    return [(pid, item["text"]) for pid, item in sorted(items, key=lambda x: x[0])][-3:]
 
 
 def meal_hint(meals: list[tuple[int, str]]) -> str:
@@ -446,7 +467,20 @@ class CoachBot:
         """/eat : quoi manger maintenant (stock, heure, entraînement), questions si besoin. Haiku, sans écriture d'agenda."""
         if not update.message or not await self._authorized(update):
             return
+        if options := recent_eat_options(datetime.datetime.now(datetime.timezone.utc)):   # pas encore choisi : mêmes plats
+            rows = [*meal_rows(options), [InlineKeyboardButton("🔄 Autre chose", callback_data="e:n")]]
+            await self._push("Tes options de tout à l'heure 👇", InlineKeyboardMarkup(rows))
+            return
         await self._ask_and_reply(update, commands.eat_prompt(datetime.datetime.now(TZ)), allow_writes=False)
+
+    async def _on_eat_again(self, update: Update) -> None:
+        """« Autre chose » : les plats de ce message tombent, de nouvelles idées arrivent."""
+        query = update.callback_query
+        await query.answer()
+        close_meal_guesses(query.message.reply_markup)
+        await query.edit_message_reply_markup(None)
+        await self._ask_and_reply(update, commands.eat_prompt(datetime.datetime.now(TZ)) +
+                                  "\nJe veux d'autres idées que celles que tu viens de me proposer.", allow_writes=False)
 
     async def on_stock(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await self._command(update, lambda: commands.format_stock_reply(store.pantry, datetime.datetime.now(TZ).date()))
@@ -536,6 +570,8 @@ class CoachBot:
                 await self._on_meal(update, parts[1])
             elif parts[0] == "q":
                 await self._on_meal_question(update, parts[1], parts[2], int(parts[3]))
+            elif parts[0] == "e":
+                await self._on_eat_again(update)
             elif parts[0] == "k":
                 await self._on_pantry_check(update, parts[1] == "y", parts[2])
             else:
@@ -805,10 +841,8 @@ class CoachBot:
         """Juste avant un repas (EAT_SUGGEST_TIMES) : des plats au choix, comme /eat, sans qu'on les demande.
         Rien si /eat vient d'être demandé, si le repas est déjà noté, ou si le coach sait qu'il se prend ailleurs."""
         now = datetime.datetime.now(TZ)
-        recent = now - datetime.timedelta(hours=2)
         try:
-            if any(item.get("kind") == "meal" and item.get("recipe") and item["status"] == "open"
-                   and datetime.datetime.fromisoformat(item["created"]) > recent for item in store.state["proposals"].values()):
+            if recent_eat_options(now):   # /eat vient d'être demandé : ses plats sont encore là
                 return
             if coaching.has_meal_between(store.meals_since(now.date()), now.date(),
                                          (now - datetime.timedelta(minutes=90)).time(), now.time()):
