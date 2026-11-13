@@ -15,8 +15,9 @@ from .config import FR_DAYS, TZ, settings
 
 logger = logging.getLogger(__name__)
 
-VOLUME_WEEKS = 6
-RECENT_RUNS = 10
+VOLUME_WEEKS = 12          # volume hebdo détaillé (semaine en cours incluse)
+DETAILED_RUNS = 150        # runs listés un par un ; au-delà, les plus anciens ne sont résumés que par mois
+HISTORY_CACHE_S = 600      # l'historique complet est relu au plus toutes les 10 min (ou dès qu'un nouveau run arrive)
 
 
 @functools.cache
@@ -81,7 +82,9 @@ def format_activity(a: dict) -> str:
     if a.get("averageHeartRate"):
         parts.append(f"FC moy {a['averageHeartRate']}")
     sport = "" if a.get("sportType") == "Run" else f" [{a.get('sportType')}]"
-    return f"- {day} : {a.get('name', 'Sortie')}{sport} — {', '.join(parts)} (id {a.get('id')})"
+    note = " ".join(str(a.get("description") or "").split())
+    note = f" « {note[:100]}{'…' if len(note) > 100 else ''} »" if note else ""
+    return f"- {day} : {a.get('name', 'Sortie')}{sport}{note} — {', '.join(parts)} (id {a.get('id')})"
 
 
 def format_load(d: dict) -> str:
@@ -110,19 +113,62 @@ def weekly_volume(activities: list[dict], today: datetime.date, weeks: int) -> l
     return [(m, *totals.get(m, (0.0, 0))) for m in mondays]
 
 
+def _pace_s(a: dict) -> float | None:
+    km, secs = distance_km(a), a.get("movingTimeInSeconds")
+    return secs / km if km and secs else None
+
+
+def _fmt_pace(p: float) -> str:
+    return f"{int(p // 60)}'{int(p % 60):02d}/km"
+
+
+def monthly_volume(activities: list[dict]) -> list[tuple[str, float, int, float, float | None]]:
+    """(AAAA-MM, km, nb de sorties, plus longue, allure moyenne en s/km) par mois, le plus ancien d'abord."""
+    months = defaultdict(list)
+    for a in activities:
+        if (a.get("startDateLocal") or "")[:7]:
+            months[a["startDateLocal"][:7]].append(a)
+    out = []
+    for month in sorted(months):
+        runs = months[month]
+        km = sum(distance_km(a) for a in runs)
+        secs = sum(a.get("movingTimeInSeconds") or 0 for a in runs if distance_km(a))
+        out.append((month, km, len(runs), max(distance_km(a) for a in runs), secs / km if km and secs else None))
+    return out
+
+
+def records(activities: list[dict]) -> list[str]:
+    lines = []
+    if activities:
+        lines.append(f"plus longue sortie : {format_activity(max(activities, key=distance_km))[2:]}")
+    for min_km in (5, 10, 21.1):
+        timed = [a for a in activities if distance_km(a) >= min_km and _pace_s(a)]
+        if timed:
+            best = min(timed, key=_pace_s)
+            lines.append(f"meilleure allure sur {min_km:g} km ou plus : {_fmt_pace(_pace_s(best))} ({format_activity(best)[2:]})")
+    return lines
+
+
 def format_runs(activities: list[dict], today: datetime.date) -> str:
-    """Volume hebdo (semaines lun→dim) + derniers runs détaillés + plus longue sortie."""
-    lines = [f"Volume course par semaine ({VOLUME_WEEKS} dernières, semaine en cours incluse) :"]
+    """Tout l'historique : totaux et records, volume par mois et par semaine, puis chaque run (les plus récents)."""
+    if not activities:
+        return "Historique de course : aucun run dans Dreeve."
+    first = min((a.get("startDateLocal") or "")[:10] for a in activities)
+    total = sum(distance_km(a) for a in activities)
+    lines = [f"HISTORIQUE COMPLET DE COURSE (Dreeve) : {len(activities)} runs depuis le {first}, {total:.0f} km au total.",
+             "Records :"] + [f"- {r}" for r in records(activities)]
+    lines.append("Volume par mois (tout l'historique) :")
+    for month, km, n, longest, pace in monthly_volume(activities):
+        lines.append(f"- {month} : {km:.1f} km en {n} sortie(s), plus longue {longest:.1f} km"
+                     + (f", allure moyenne {_fmt_pace(pace)}" if pace else ""))
+    lines.append(f"Volume par semaine ({VOLUME_WEEKS} dernières, semaine en cours incluse) :")
     for monday, km, n in weekly_volume(activities, today, VOLUME_WEEKS):
         lines.append(f"- semaine du {monday:%d/%m} : {km:.1f} km en {n} sortie(s)")
-
-    if activities:
-        lines.append(f"{min(RECENT_RUNS, len(activities))} derniers runs :")
-        lines += [format_activity(a) for a in activities[:RECENT_RUNS]]
-        longest = max(activities, key=distance_km)
-        lines.append(f"Plus longue sortie sur la période : {format_activity(longest)[2:]}")
-    else:
-        lines.append(f"Aucun run sur les {VOLUME_WEEKS} dernières semaines.")
+    shown = activities[:DETAILED_RUNS]
+    older = len(activities) - len(shown)
+    lines.append("Tous les runs, du plus récent au plus ancien" + (f" ({len(shown)} derniers ; les {older} plus anciens "
+                 "sont dans le volume par mois, détail via les outils Dreeve)" if older else "") + " :")
+    lines += [format_activity(a) for a in shown]
     return "\n".join(lines)
 
 
@@ -146,8 +192,33 @@ def get_runs_since_weeks(weeks: int) -> tuple[list[dict], datetime.date]:
     return data.get("activities") or [], today
 
 
+_history_cache: tuple[float, str | None, list[dict]] = (0.0, None, [])
+
+
+def get_all_runs() -> list[dict]:
+    """Tous les runs de Dreeve (pages de 100), du plus récent au plus ancien. Relu au plus toutes les HISTORY_CACHE_S
+    secondes, ou dès que le run le plus récent change."""
+    global _history_cache
+    import time
+    latest = get_recent_runs(1)
+    latest_id = latest[0].get("id") if latest else None
+    fetched_at, cached_id, runs = _history_cache
+    if runs and cached_id == latest_id and time.monotonic() - fetched_at < HISTORY_CACHE_S:
+        return runs
+    runs, page = [], 1
+    while True:
+        data = _get_json("/activities", **{"filters[sportType]": settings.dreeve_run_types,
+                                            "pagination[size]": 100, "pagination[page]": page})
+        runs += data.get("activities") or []
+        if page >= ((data.get("pagination") or {}).get("totalPages") or 1):
+            break
+        page += 1
+    _history_cache = (time.monotonic(), latest_id, runs)
+    return runs
+
+
 def get_runs_text() -> str:
-    return format_runs(*get_runs_since_weeks(VOLUME_WEEKS))
+    return format_runs(get_all_runs(), datetime.datetime.now(TZ).date())
 
 
 def get_load() -> dict:

@@ -112,12 +112,43 @@ def test_format_runs_weekly_volume():
     text = dreeve.format_runs(runs, today)
     assert "semaine du 02/11 : 10.0 km en 1 sortie(s)" in text
     assert "semaine du 26/10 : 21.1 km en 1 sortie(s)" in text
-    assert "semaine du 28/09" in text   # 6 semaines affichées, même vides
-    assert "Plus longue sortie" in text and "21.1 km" in text
+    assert "semaine du 24/08" in text   # 12 semaines affichées, même vides
+    assert "plus longue sortie : mer 28/10" in text and "21.1 km" in text
+    assert "2 runs depuis le 2026-10-28, 31 km au total" in text
+    assert "- 2026-10 : 21.1 km en 1 sortie(s)" in text and "- 2026-11 : 10.0 km en 1 sortie(s)" in text
+    assert "meilleure allure sur 21.1 km ou plus : 2'22/km" in text
+    listed = text.split("Tous les runs")[1]
+    assert listed.index("activity-1)") < listed.index("activity-2)")   # chaque run, le plus récent d'abord
+
+
+def test_format_runs_keeps_older_runs_monthly_only(monkeypatch):
+    monkeypatch.setattr(dreeve, "DETAILED_RUNS", 1)
+    runs = [RUN, {**RUN, "id": "activity-2", "startDateLocal": "2026-07-05T07:00:00", "description": "premier semi"}]
+    text = dreeve.format_runs(runs, datetime.date(2026, 11, 8))
+    assert "activity-2)" not in text and "le 1 plus anciens" not in text and "les 1 plus anciens" in text
+    assert "- 2026-07 : 10.0 km" in text
+    assert "« premier semi »" in dreeve.format_activity(runs[1])
+
+
+def test_all_runs_paginated_and_cached(monkeypatch):
+    pages = {1: [{"id": 3}, {"id": 2}], 2: [{"id": 1}]}
+    calls = []
+
+    def fake_get(path, timeout=None, **params):
+        page = params.get("pagination[page]")
+        calls.append(page)
+        if page is None:   # get_recent_runs(1)
+            return {"activities": [{"id": 3}]}
+        return {"activities": pages[page], "pagination": {"totalPages": 2}}
+
+    monkeypatch.setattr(dreeve, "_get_json", fake_get)
+    monkeypatch.setattr(dreeve, "_history_cache", (0.0, None, []))
+    assert [r["id"] for r in dreeve.get_all_runs()] == [3, 2, 1]
+    assert [r["id"] for r in dreeve.get_all_runs()] == [3, 2, 1] and calls == [None, 1, 2, None]   # cache
 
 
 def test_format_runs_empty():
-    assert "Aucun run" in dreeve.format_runs([], datetime.date(2026, 11, 8))
+    assert "aucun run" in dreeve.format_runs([], datetime.date(2026, 11, 8))
 
 
 def test_format_load():
