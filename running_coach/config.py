@@ -72,14 +72,14 @@ def _briefing_time(value: str | None, name: str = "BRIEFING_TIME") -> tuple[int,
         raise ValueError(f"{name} doit être au format HH:MM ou « off » (reçu : {value!r})") from None
 
 
-def _meal_times(value: str | None) -> list[tuple[int, int]]:
-    """MEAL_CHECK_TIMES : « 10:30,14:30,21:30 » → heures (triées) des questions « qu'as-tu mangé ? » ; off = jamais."""
+def _meal_times(value: str | None, name: str = "MEAL_CHECK_TIMES") -> list[tuple[int, int]]:
+    """« 10:30,14:30,21:30 » → heures triées (MEAL_CHECK_TIMES, EAT_SUGGEST_TIMES) ; off = jamais."""
     if not value or value.lower() in ("off", "non", "no", "none", "0"):
         return []
     try:
-        return sorted(_briefing_time(part.strip(), "MEAL_CHECK_TIMES") for part in value.split(",") if part.strip())
+        return sorted(_briefing_time(part.strip(), name) for part in value.split(",") if part.strip())
     except TypeError:   # un élément « off » au milieu de la liste
-        raise ValueError(f"MEAL_CHECK_TIMES doit être une liste HH:MM séparée par des virgules ou « off » (reçu : {value!r})") from None
+        raise ValueError(f"{name} doit être une liste HH:MM séparée par des virgules ou « off » (reçu : {value!r})") from None
 
 
 _DOW = {"mon": 0, "lun": 0, "tue": 1, "mar": 1, "wed": 2, "mer": 2, "thu": 3, "jeu": 3,
@@ -164,6 +164,7 @@ class Settings:
     weekly_review: tuple[int, int, int] | None
     pantry_check_time: tuple[int, int] | None
     meal_check_times: list[tuple[int, int]]
+    eat_suggest_times: list[tuple[int, int]]
     meal_boxes: int
     whisper_model: str | None
     activity_poll_minutes: int
@@ -212,6 +213,7 @@ class Settings:
             weekly_review=_weekly_time(_str("WEEKLY_REVIEW_TIME", "sun 19:00")),
             pantry_check_time=_briefing_time(_str("PANTRY_CHECK_TIME", "18:00"), "PANTRY_CHECK_TIME"),
             meal_check_times=_meal_times(_str("MEAL_CHECK_TIMES", "10:30,14:30,21:30")),
+            eat_suggest_times=_meal_times(_str("EAT_SUGGEST_TIMES", "07:00,11:30,18:30"), "EAT_SUGGEST_TIMES"),
             meal_boxes=max(1, _int("MEAL_BOXES", 3)),
             whisper_model=_optional_model(_str("WHISPER_MODEL", "small")),
             activity_poll_minutes=_int("ACTIVITY_POLL_MINUTES", 1),
@@ -253,7 +255,7 @@ class Settings:
             logger.info(f"[CONFIG] {name} : {'activé' if ok else 'désactivé'}")
         logger.info(f"[CONFIG] modèles={self.model} (conversation) / {self.planning_model} (planification), "
                     f"fuseau={self.tz.key}, briefing={self.briefing_time}, bilan hebdo={self.weekly_review}, "
-                    f"vérification du stock={self.pantry_check_time}, questions repas={self.meal_check_times}, boîtes={self.meal_boxes}, "
+                    f"vérification du stock={self.pantry_check_time}, questions repas={self.meal_check_times}, suggestions repas={self.eat_suggest_times}, boîtes={self.meal_boxes}, "
                     f"détection runs={self.activity_poll_minutes} min")
 
 

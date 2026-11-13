@@ -255,3 +255,22 @@ def test_dodging_reply_is_retried_once(tmp_path, monkeypatch):
     reply = asyncio.run(agent.ask("c'est une bonne idée ?", chat_id="1"))
     assert reply.text == "Non : +58 % c'est trop." and len(fake.calls) == 2
     assert {"role": "user", "content": agent.DODGE_NUDGE} in fake.calls[1]["messages"]
+
+
+def test_skip_marker_returns_nothing_and_keeps_history_clean(tmp_path, monkeypatch):
+    store = Store(tmp_path / "state.json")
+    monkeypatch.setattr(agent, "store", store)
+    monkeypatch.setattr(tools, "store", store)
+
+    async def fake_context():
+        return "CONTEXTE"
+
+    async def no_tools():
+        return []
+
+    monkeypatch.setattr(agent, "_gather_context", fake_context)
+    monkeypatch.setattr(dreeve_mcp, "load_tools", no_tools)
+    skip = NS(stop_reason="end_turn", usage=_usage(), content=[NS(type="text", text="« PAS_DE_SUGGESTION »")])
+    monkeypatch.setattr(agent, "_client", NS(messages=FakeMessages([skip])))
+    reply = asyncio.run(agent.ask("repas ?", chat_id="1", allow_writes=False, skip_marker="PAS_DE_SUGGESTION"))
+    assert reply.text == "" and not reply.meals and store.history("1") == []

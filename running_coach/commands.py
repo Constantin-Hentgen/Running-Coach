@@ -72,15 +72,30 @@ def parse_days(args: list[str], default: int = AGENDA_DEFAULT_DAYS, maximum: int
     return max(1, min(days, maximum))
 
 
-def eat_prompt(now: datetime.datetime) -> str:
+NO_SUGGESTION = "PAS_DE_SUGGESTION"
+
+
+def eat_prompt(now: datetime.datetime, spontaneous: bool = False) -> str:
+    if spontaneous:   # envoyé par le système juste avant un repas, sans demande de l'athlète
+        intro = (
+            f"[Suggestion automatique avant le repas] Il est {FR_DAYS[now.weekday()]} {now:%d/%m %H:%M}, je vais bientôt "
+            "manger. Si d'après ma mémoire ou l'agenda je ne mange pas chez moi à ce repas (jour de bureau le midi, "
+            f"restaurant, déplacement…), réponds uniquement « {NO_SUGGESTION} » et rien d'autre. Sinon, propose-moi "
+            "directement quoi manger, sans me poser de question d'abord, en commençant par une courte phrase naturelle "
+            "(« Pour ce midi, je te propose : »).\n"
+        )
+    else:
+        intro = f"Que dois-je manger maintenant ? Il est {FR_DAYS[now.weekday()]} {now:%d/%m %H:%M}.\n"
     return (
-        f"Que dois-je manger maintenant ? Il est {FR_DAYS[now.weekday()]} {now:%d/%m %H:%M}.\n"
+        intro +
         "Déduis-le de mon stock (contexte), de l'heure (petit-déjeuner, déjeuner, collation, dîner), de mon entraînement "
         "(séance qui vient de se terminer ou qui arrive aujourd'hui ou demain matin, charge, ressentis), de mes objectifs et "
         "de ma mémoire (goûts, allergies, rassasiement).\n"
-        "Si une information change vraiment la réponse et que tu ne peux pas la déduire (combien de temps j'ai, si je "
-        "mange seul, si un produit frais ancien est encore là…), pose-moi d'abord une ou deux questions courtes et "
-        "arrête-toi là. Sinon, propose-moi 2 ou 3 plats variés au choix (dont un express si possible ; une boîte prête au "
+        + ("" if spontaneous else
+           "Si une information change vraiment la réponse et que tu ne peux pas la déduire (combien de temps j'ai, si je "
+           "mange seul, si un produit frais ancien est encore là…), pose-moi d'abord une ou deux questions courtes et "
+           "arrête-toi là. Sinon, ") +
+        "propose-moi 2 ou 3 plats variés au choix (dont un express si possible ; une boîte prête au "
         "stock en premier). Pense efficacité : un plat qui se cuisine en plus grande quantité pour remplir mes boîtes "
         "libres (contexte) pour les prochains jours est un bon choix, en restant varié avec ce qui est déjà en boîtes. "
         "format Telegram très concis, une ligne chacun :\n"

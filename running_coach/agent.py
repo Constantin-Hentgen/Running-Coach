@@ -310,11 +310,13 @@ async def add_to_history(chat_id: str, note: str, message: str) -> None:
 
 
 async def ask(user_prompt: str, chat_id: str = "default", allow_writes: bool = True,
-              planning: bool = False) -> AgentReply:
+              planning: bool = False, skip_marker: str | None = None) -> AgentReply:
     """Point d'entrée unique : renvoie le texte à envoyer sur Telegram (compte-rendu inclus) et les propositions.
 
     allow_writes=False : pas d'outils d'écriture d'agenda (mémoire, objectifs, propositions et lecture restent permis).
     planning=True : modèle de planification (CLAUDE_PLANNING_MODEL), pour le bilan de la semaine uniquement.
+    skip_marker : le prompt permet au modèle de répondre ce seul mot pour « rien à envoyer » (message système non sollicité) :
+    réponse vide, et rien n'entre dans l'historique.
     """
     model = settings.planning_model if planning else settings.model
     async with _lock:
@@ -346,6 +348,10 @@ async def ask(user_prompt: str, chat_id: str = "default", allow_writes: bool = T
         except Exception as e:
             logger.exception("Erreur dans la boucle agent")
             error = f"{type(e).__name__}: {e}"
+
+        if skip_marker and not error and not ledger.actions and reply.strip().strip("«»\"' .").upper() == skip_marker:
+            logger.info(f"Agent ({model}) : rien à envoyer ({skip_marker})")
+            return AgentReply("")
 
         calendar_actions = [a for a in ledger.actions if a.kind in ("create", "update", "delete")]
         proposals = [(int(a.detail), a.label) for a in ledger.actions if a.kind == "proposal"]

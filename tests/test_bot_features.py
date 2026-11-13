@@ -1059,3 +1059,46 @@ def test_last_box_is_said_and_skipping_closes_the_guesses(tmp_path, monkeypatch)
     dahl = _buttons(markup)[0][1]
     _click(b, "q:s:2026-11-11:1", markup)
     assert _click(b, dahl, markup).answers == ["Déjà noté."]                  # sauté : le plat deviné ne compte plus
+
+
+def test_meal_suggestion_before_eating_and_when_it_stays_quiet(tmp_path, monkeypatch):
+    b, store = _bot(tmp_path, monkeypatch)
+    calls = []
+
+    async def fake_ask(prompt, chat_id, allow_writes=True, planning=False, skip_marker=None):
+        calls.append((prompt, allow_writes, skip_marker))
+        mid = store.add_proposal("Omelette", kind="meal", uses=[], recipe="1. Casser les œufs")
+        return agent.AgentReply("Pour ce midi, je te propose :", meals=[(mid, "Omelette")])
+
+    monkeypatch.setattr(bot_module.agent, "ask", fake_ask)
+    _at(monkeypatch, 11, 30)
+    asyncio.run(b.suggest_meal())
+    prompt, allow_writes, marker = calls[-1]
+    assert "[Suggestion automatique avant le repas]" in prompt and "bureau" in prompt and "question" in prompt
+    assert allow_writes is False and marker == bot_module.commands.NO_SUGGESTION
+    text, markup = b.sent[-1]
+    assert text.startswith("Pour ce midi") and [l for l, _ in _buttons(markup)] == ["🍽️ Omelette"]
+
+    asyncio.run(b.suggest_meal())                       # dishes just offered (as after /eat): no second message
+    assert len(calls) == 1
+
+    async def office(*args, **kwargs):                  # the coach knows lunch is at the office: nothing sent
+        return agent.AgentReply("")
+
+    monkeypatch.setattr(bot_module.agent, "ask", office)
+    for item in store.state["proposals"].values():
+        item["status"] = "ignored"
+    n = len(b.sent)
+    asyncio.run(b.suggest_meal())
+    assert len(b.sent) == n
+
+    store.log_meal("Sandwich", datetime.datetime(2026, 11, 11, 11, 0, tzinfo=bot_module.TZ))
+    monkeypatch.setattr(bot_module.agent, "ask", fake_ask)
+    asyncio.run(b.suggest_meal())                       # already eaten: no suggestion
+    assert len(calls) == 1
+
+
+def test_eat_suggest_times_setting():
+    from running_coach import config
+    assert config._meal_times("07:00,11:30,18:30", "EAT_SUGGEST_TIMES") == [(7, 0), (11, 30), (18, 30)]
+    assert config._meal_times("off", "EAT_SUGGEST_TIMES") == []

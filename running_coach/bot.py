@@ -771,6 +771,26 @@ class CoachBot:
         except Exception:
             logger.exception("Question repas en échec")
 
+    async def suggest_meal(self) -> None:
+        """Juste avant un repas (EAT_SUGGEST_TIMES) : des plats au choix, comme /eat, sans qu'on les demande.
+        Rien si /eat vient d'être demandé, si le repas est déjà noté, ou si le coach sait qu'il se prend ailleurs."""
+        now = datetime.datetime.now(TZ)
+        recent = now - datetime.timedelta(hours=2)
+        try:
+            if any(item.get("kind") == "meal" and item.get("recipe") and item["status"] == "open"
+                   and datetime.datetime.fromisoformat(item["created"]) > recent for item in store.state["proposals"].values()):
+                return
+            if coaching.has_meal_between(store.meals_since(now.date()), now.date(),
+                                         (now - datetime.timedelta(minutes=90)).time(), now.time()):
+                return
+            reply = await asyncio.wait_for(agent.ask(commands.eat_prompt(now, spontaneous=True), chat_id=self.chat_id,
+                                                     allow_writes=False, skip_marker=commands.NO_SUGGESTION),
+                                           DEBRIEF_TIMEOUT_S)
+            if reply.text or reply.meals:
+                await self._deliver(reply)
+        except Exception:
+            logger.exception("Suggestion de repas en échec")
+
     async def check_weather(self) -> None:
         """Prévient (une fois par risque et par séance) en cas de pluie, chaleur, vent ou verglas, et quand ça s'arrange."""
         try:
