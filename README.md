@@ -1,6 +1,8 @@
 # 🏃 Running Coach — an AI running coach on Telegram
 
 A self-hosted personal running coach that you talk to **in plain language on Telegram**.
+The coach is **Bob**: a warm mate rather than a lecturer. He trusts you as the expert of your own training, reminds you of the essentials at the right time (the session, recovery, eating well, your goals in running, nutrition and health as a lifestyle) and keeps his messages to one or two short lines. The bot's Telegram display name is set to Bob at startup (`BOT_NAME`).
+
 It schedules your sessions directly in **your CalDAV calendar (Radicale)**, relies on **your real training data (Dreeve)** and the **weather**, and **learns your preferences** as you chat.
 
 Powered by Claude (Anthropic), `claude-haiku-5-5` by default.

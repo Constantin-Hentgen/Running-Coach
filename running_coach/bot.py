@@ -18,35 +18,32 @@ from .memory import LEGS, PANTRY_ASK_GRACE_DAYS, store
 
 logger = logging.getLogger(__name__)
 
+BOT_NAME = "Bob"   # nom affiché du bot dans Telegram, et son personnage (voir agent.SYSTEM_PROMPT)
+
 MORNING_PROMPT = (
     "Réalise le briefing matinal. Analyse l'agenda Radicale, la météo, la charge, mon historique Dreeve, mes ressentis et "
     "le compte à rebours de mes objectifs, en appliquant tout ce que tu sais de moi. "
     f"Met à jour / planifie les {settings.planning_horizon_days} prochains jours dans Radicale, en cohérence avec la "
     "périodisation vers mon objectif principal.\n"
-    "Puis écris-moi comme un coach par messages : 2 ou 3 messages courts (1 à 2 lignes chacun, séparés par une ligne "
-    "vide) : la séance du jour et l'essentiel pour la réussir (météo, forme) ; ce qui a changé dans l'agenda s'il y a "
-    "lieu. Pas de titres, pas de récapitulatif de la semaine."
+    "Puis envoie-moi un petit mot du matin, comme un pote : 1 ou 2 messages d'une ligne (séparés par une ligne vide) : "
+    "la séance du jour (ou le repos) et LE truc à ne pas oublier (météo, récup, repas…), plus ce qui a changé dans "
+    "l'agenda s'il y a lieu. Pas de titres, pas de chiffres inutiles."
 )
 
 DEBRIEF_PROMPT = (
     "{intro} :\n{runs}\n\n"
-    "Fais-moi un retour de coach comme par messages : 2 à 4 messages très courts (1 à 2 lignes chacun, séparés par une "
-    "ligne vide), sans titres :\n"
-    "- comment ça s'est passé par rapport à ce qui était prévu (relis l'agenda du jour avec list_calendar_events si "
-    "besoin, et les tours/splits Dreeve si utile) ;\n"
-    "- le point marquant par rapport à mon historique (progrès net, séance similaire, ou signal d'alerte), seulement "
-    "s'il y en a un ;\n"
-    "- la suite : le programme reste adapté ou pas (charge, ressentis, météo). Si un ajustement est conseillé, "
-    "enregistre-le avec propose_change sans le faire.\n"
-    "Ne parle des objectifs que si cette séance change quelque chose pour eux. Ne modifie pas l'agenda."
+    "Réagis comme un pote qui suit mes courses : 1 ou 2 messages très courts (une ligne chacun, séparés par une ligne "
+    "vide), sans titres ni liste de chiffres. Un mot sincère sur la séance (par rapport à ce qui était prévu et à mon "
+    "historique : relis l'agenda du jour avec list_calendar_events si besoin), et seulement si ça compte : la chose à "
+    "retenir pour la suite (récup, repas, prochaine séance), en gardant mes objectifs en tête. Si un ajustement du programme est vraiment conseillé, "
+    "enregistre-le avec propose_change sans le faire. Ne modifie pas l'agenda."
 )
 
 REVIEW_PROMPT = (
     "Fais le bilan de ma semaine. Chiffres calculés par le système (fiables, ne les recalcule pas) :\n{adherence}\n\n"
-    "Écris-le comme par messages : 3 ou 4 messages courts (1 à 2 lignes chacun, séparés par une ligne vide), sans "
-    "titres : la semaine en une phrase (régularité, volume, ce qui a manqué) ; la forme (charge et ressentis) ; "
-    "la semaine prochaine (l'intention et la séance clé). Si le programme mérite un ajustement, enregistre-le avec "
-    "propose_change sans le faire. Ne modifie pas l'agenda."
+    "Dis-le comme un pote : 2 messages d'une ou deux lignes (séparés par une ligne vide), sans titres : ce que je "
+    "retiens de la semaine (course, alimentation, forme) ; le cap pour la semaine prochaine. Si le programme mérite un "
+    "ajustement, enregistre-le avec propose_change sans le faire. Ne modifie pas l'agenda."
 )
 
 APPLY_PROMPT = "Applique maintenant cette proposition que tu m'as faite et que je valide : {text}"

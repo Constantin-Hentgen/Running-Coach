@@ -10,7 +10,7 @@ from fastapi import FastAPI
 
 from . import calendar_store as cs
 from . import dreeve, dreeve_mcp, weather
-from .bot import build_bot
+from .bot import BOT_NAME, build_bot
 from .commands import BOT_COMMANDS
 from .config import UTC, settings
 
@@ -62,8 +62,10 @@ async def lifespan(_: FastAPI):
         await tg_app.updater.start_polling()
         try:
             await tg_app.bot.set_my_commands(BOT_COMMANDS)   # menu « / » dans Telegram
+            if (await tg_app.bot.get_my_name()).name != BOT_NAME:   # nom affiché du bot (limité par Telegram : seulement s'il change)
+                await tg_app.bot.set_my_name(BOT_NAME)
         except Exception as e:
-            logger.warning(f"Menu des commandes Telegram non publié : {e}")
+            logger.warning(f"Menu des commandes ou nom ({BOT_NAME}) Telegram non publié : {e}")
 
         if settings.telegram_chat_id:
             scheduler = AsyncIOScheduler(timezone=settings.tz)
