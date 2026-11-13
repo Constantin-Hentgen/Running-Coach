@@ -145,6 +145,7 @@ class Settings:
     dreeve_api_key: str | None
     dreeve_mcp_key: str | None
     dreeve_mcp_url: str | None
+    giphy_api_key: str | None
     dreeve_run_types: str
     # Météo
     weather_locations: list[tuple[str, float, float]]
@@ -199,6 +200,7 @@ class Settings:
             dreeve_run_types=_str("DREEVE_RUN_TYPES", "Run,TrailRun,VirtualRun"),
             weather_locations=_weather_locations(),
             weather_api_url=_str("WEATHER_API_URL", "https://api.open-meteo.com/v1/forecast"),
+            giphy_api_key=_str("GIPHY_API_KEY"),
             rain_check_minutes=_int("RAIN_ALERT_CHECK_MINUTES", 60),
             rain_hours_ahead=_int("RAIN_ALERT_HOURS_AHEAD", 48),
             rain_probability=_int("RAIN_ALERT_PROBABILITY", 60),

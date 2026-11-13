@@ -243,10 +243,22 @@ class CoachBot:
         text = "\n\n".join(part for part in (body, footer) if part)
         if text:   # un message par paragraphe : une conversation, pas un pavé
             await send_text(self._sender(update), text, markup, as_bubbles=True)
+        if reply.gif:
+            await self._send_gif(reply.gif, update)
         for pid, summary in reply.proposals:
             await send_text(self._sender(update), proposal_bubble(summary), proposal_markup(pid))
         if reply.shopping_list is not None and (lst := store.shopping_list) and lst["id"] == reply.shopping_list:
             await send_text(self._sender(update), shopping_text(lst), shopping_markup(lst))
+
+    async def _send_gif(self, url: str, update: Update | None = None) -> None:
+        """Le GIF choisi par le coach, juste après son message ; un échec ne bloque jamais la réponse."""
+        try:
+            if update is not None and update.effective_message is not None:
+                await update.effective_message.reply_animation(url)
+            else:
+                await self.app.bot.send_animation(chat_id=self.chat_id, animation=url)
+        except Exception as e:
+            logger.warning(f"GIF non envoyé ({url}) : {e}")
 
     async def _authorized(self, update: Update) -> bool:
         """Le bot peut modifier l'agenda : il ne répond qu'au chat TELEGRAM_CHAT_ID.

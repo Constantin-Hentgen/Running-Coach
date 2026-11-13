@@ -70,6 +70,8 @@ def priority_of(value) -> int:
         return DEFAULT_PRIORITY
 
 
+INTERACTION_GAP_MIN = 90   # silence au-delà duquel une nouvelle session d'échange commence
+
 class Store:
     def __init__(self, path: Path, seed: list[tuple[str, str]] | None = None):
         self.path = path
@@ -92,6 +94,7 @@ class Store:
         state.setdefault("next_id", 1)
         state.setdefault("history", {})
         state.setdefault("last_activity_id", None)
+        state.setdefault("interaction", {"start": None, "last": None, "gif_at": None})   # session en cours, dernier GIF
         state.setdefault("goals", [])
         state.setdefault("next_goal_id", 1)
         state.setdefault("proposals", {})     # id → {text, kind, created, status}
@@ -591,6 +594,26 @@ class Store:
         since = (today - datetime.timedelta(days=days)).isoformat()
         items = [dict(v, activity_id=k) for k, v in self.state["checkins"].items() if v.get("date", "") >= since]
         return sorted(items, key=lambda c: c["date"])
+
+    # --- session d'échange (un GIF au plus par session) ------------------------------------
+
+    def touch_interaction(self, now: datetime.datetime) -> None:
+        """Un échange avec le coach : une nouvelle session commence après INTERACTION_GAP_MIN minutes de silence."""
+        with self._lock:
+            s = self.state["interaction"]
+            if not s["last"] or now - datetime.datetime.fromisoformat(s["last"]) > datetime.timedelta(minutes=INTERACTION_GAP_MIN):
+                s["start"] = now.isoformat()
+            s["last"] = now.isoformat()
+            self._save()
+
+    def gif_available(self) -> bool:
+        s = self.state["interaction"]
+        return not s["gif_at"] or not s["start"] or s["gif_at"] < s["start"]
+
+    def mark_gif(self, now: datetime.datetime) -> None:
+        with self._lock:
+            self.state["interaction"]["gif_at"] = now.isoformat()
+            self._save()
 
     @property
     def last_activity_id(self):

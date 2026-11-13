@@ -1,6 +1,8 @@
 """Outils exposés au modèle + registre (ledger) des actions réellement effectuées."""
 import datetime
 import logging
+
+import requests
 from dataclasses import dataclass, field
 
 from . import calendar_store as cs
@@ -593,7 +595,48 @@ LOG_MEAL_TOOL = {
     },
 }
 
-_COMMON = [*MEMORY_TOOLS, *GOAL_TOOLS, PROPOSE_TOOL, *SHOPPING_TOOLS, EDIT_SHOPPING_TOOL, STOCK_TOOL, MEAL_TOOL, LOG_MEAL_TOOL]
+GIF_TOOL = {
+    "name": "send_gif",
+    "description": (
+        "Envoie un GIF ou un mème drôle juste après ton message, comme le ferait un pote. Rarement : un seul par session au "
+        "plus, et seulement quand il illustre exactement ce que tu dis (une belle séance, la pluie un jour de sortie "
+        "longue, un repas sauté…) ; jamais au hasard, jamais sur un sujet sérieux (douleur, blessure, coup dur). "
+        "Ne le décris pas dans ton message."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "2 à 4 mots-clés EN ANGLAIS décrivant la réaction ou la scène, "
+                      "ex: « proud high five », « running in the rain », « hungry waiting ». Jamais de nom ni d'info personnelle."},
+        },
+        "required": ["query"],
+    },
+}
+
+GIPHY_SEARCH_URL = "https://api.giphy.com/v1/gifs/search"
+
+
+def tool_send_gif(args: dict, ledger: Ledger) -> dict:
+    if not store.gif_available():
+        return {"ok": False, "error": "un GIF a déjà été envoyé dans cette session : pas d'autre"}
+    query = " ".join(str(args.get("query") or "").split())[:50]
+    if not query:
+        raise ValueError("query vide")
+    res = requests.get(GIPHY_SEARCH_URL, timeout=settings.http_timeout, params={
+        "api_key": settings.giphy_api_key, "q": query, "limit": 5, "rating": "pg-13", "lang": "en"})
+    res.raise_for_status()
+    for gif in res.json().get("data") or []:
+        images = gif.get("images") or {}
+        url = (images.get("downsized_medium") or {}).get("url") or (images.get("original") or {}).get("url")
+        if url:
+            store.mark_gif(cs.now_utc())
+            ledger.record("gif", query, True, detail=url)
+            return {"ok": True, "note": "Le GIF part juste après ton message. Ne le décris pas."}
+    return {"ok": False, "error": f"aucun GIF trouvé pour « {query} » : continue sans"}
+
+
+_COMMON = [*MEMORY_TOOLS, *GOAL_TOOLS, PROPOSE_TOOL, *SHOPPING_TOOLS, EDIT_SHOPPING_TOOL, STOCK_TOOL, MEAL_TOOL, LOG_MEAL_TOOL,
+           *([GIF_TOOL] if settings.giphy_api_key else [])]
 ALL_TOOLS = [LIST_TOOL, *WRITE_TOOLS, *_COMMON]
 READ_ONLY_TOOLS = [LIST_TOOL, *_COMMON]
 
@@ -612,6 +655,7 @@ _IMPL = {
     "edit_shopping_list": tool_edit_shopping_list,
     "propose_meal": tool_propose_meal,
     "log_meal": tool_log_meal,
+    "send_gif": tool_send_gif,
 }
 
 

@@ -1119,3 +1119,43 @@ def test_bubbles_split_on_blank_lines_and_keep_lists_together():
     from running_coach.formatting import bubbles
     assert [b.strip() for b in bubbles("A\n\n- un\n- deux\n \nB")] == ["A", "- un\n- deux", "B"]
     assert bubbles("") == []
+
+
+def test_gif_once_per_session_and_sent_after_the_message(tmp_path, monkeypatch):
+    from running_coach import tools
+    b, store = _bot(tmp_path, monkeypatch)
+    monkeypatch.setattr(tools, "store", store)
+    calls = []
+
+    class Res:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"data": [{"images": {"downsized_medium": {"url": "https://media.giphy.com/x.gif"}}}]}
+
+    def fake_get(url, timeout=None, params=None):
+        calls.append(params["q"])
+        return Res()
+
+    monkeypatch.setattr(tools.requests, "get", fake_get)
+    t0 = datetime.datetime(2026, 11, 13, 18, 0, tzinfo=bot_module.TZ)
+    store.touch_interaction(t0)
+    ledger = tools.Ledger()
+    assert tools.tool_send_gif({"query": "proud high five"}, ledger)["ok"]
+    assert ledger.actions[0].detail == "https://media.giphy.com/x.gif" and calls == ["proud high five"]
+    store.touch_interaction(t0 + datetime.timedelta(minutes=30))           # same session: no second GIF
+    assert not tools.tool_send_gif({"query": "rain"}, tools.Ledger())["ok"] and len(calls) == 1
+    store.touch_interaction(t0 + datetime.timedelta(hours=3))              # new session after a long silence
+    assert store.gif_available()
+
+    sent_gifs = []
+
+    async def send_animation(chat_id, animation):
+        sent_gifs.append((chat_id, animation, len(b.sent)))
+
+    b.app = NS(bot=NS(send_animation=send_animation))
+    pid = store.add_proposal("x", summary="On décale jeudi ?")
+    asyncio.run(b._deliver(agent.AgentReply("Belle séance !", [(pid, "On décale jeudi ?")], gif="https://g/x.gif")))
+    assert sent_gifs == [("42", "https://g/x.gif", 1)]                     # after the text, before the proposal
+    assert b.sent[-1][0].startswith("💡")

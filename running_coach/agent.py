@@ -114,6 +114,8 @@ STYLE DE CONVERSATION (une discussion par messages, comme entre deux personnes, 
 - Ne recopie jamais le compte-rendu système ni les « 🧠 Noté » : le système les ajoute lui-même sous ta réponse. Les notes « [Note système…] » de l'historique sont pour toi, pas à recopier.
 - Pas de formule rassurante répétitive (« rien n'est modifié tant que… », « je ne touche à rien ») : le système l'indique déjà.
 
+GIF ET MÈMES : si l'outil `send_gif` est disponible, tu peux de temps en temps accompagner ton message d'un GIF drôle, comme un pote : un seul par session au plus, et la plupart du temps aucun. Seulement s'il illustre exactement ce que tu dis, jamais au hasard ni sur un sujet sérieux.
+
 FORMAT TELEGRAM : listes à puces (`-`), gras (`*texte*`), émojis sobres. ZÉRO TABLEAU (pas de `|`).
 """.strip()
 
@@ -219,6 +221,7 @@ class AgentReply:
     proposals: list[tuple[int, str]] = field(default_factory=list)
     shopping_list: int | None = None
     meals: list[tuple[int, str]] = field(default_factory=list)
+    gif: str | None = None   # URL d'un GIF à envoyer après le message
 
 
 def _system_blocks() -> list[dict]:
@@ -261,7 +264,9 @@ async def _gather_context() -> str:
         f"- Repas notés :\n{coaching.meals_context(store.meals_since(now.date() - datetime.timedelta(days=1)), now.date())}\n"
         f"- Liste de courses en cours {coaching.shopping_context(store.shopping_list)}\n"
         f"- Prévisions météo :{forecast}\n"
-        f"- Agenda Radicale {agenda}\n"
+        + (f"- GIF : {'possible dans cette session (un seul, et seulement s’il illustre vraiment ton message)' if store.gif_available() else 'déjà envoyé dans cette session, plus de GIF'}\n"
+           if settings.giphy_api_key else "")
+        + f"- Agenda Radicale {agenda}\n"
         f"- Dreeve :\n{dreeve_text}"
     )
 
@@ -339,6 +344,7 @@ async def ask(user_prompt: str, chat_id: str = "default", allow_writes: bool = T
     """
     model = settings.planning_model if planning else settings.model
     async with _lock:
+        store.touch_interaction(datetime.datetime.now(TZ))
         ledger = Ledger()
         reply, truncated, error = "", False, None
         try:
@@ -401,4 +407,5 @@ async def ask(user_prompt: str, chat_id: str = "default", allow_writes: bool = T
                     f"{len(proposals)} proposition(s), truncated={truncated}, error={error}")
         shopping = next((int(a.detail) for a in reversed(ledger.actions) if a.kind == "shopping" and a.ok), None)
         meals = [(int(a.detail), a.label) for a in ledger.actions if a.kind == "meal"]
-        return AgentReply(final_text, proposals, shopping, meals)
+        gif = next((a.detail for a in ledger.actions if a.kind == "gif" and a.ok), None)
+        return AgentReply(final_text, proposals, shopping, meals, gif)
