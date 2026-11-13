@@ -1,4 +1,5 @@
 """Outils exposés au modèle + registre (ledger) des actions réellement effectuées."""
+import contextvars
 import datetime
 import logging
 
@@ -656,13 +657,18 @@ def tool_search_recipe(args: dict, ledger: Ledger) -> dict:
 GIPHY_SEARCH_URL = "https://api.giphy.com/v1/gifs/search"
 
 
+# /meme : l'athlète demande lui-même un GIF, les règles de rareté (un par session, ouverture / clôture) ne jouent pas.
+GIF_ON_DEMAND: contextvars.ContextVar[bool] = contextvars.ContextVar("gif_on_demand", default=False)
+
+
 def tool_send_gif(args: dict, ledger: Ledger) -> dict:
-    if not store.gif_available():
+    on_demand = GIF_ON_DEMAND.get()
+    if not on_demand and not store.gif_available():
         return {"ok": False, "error": "un GIF a déjà été envoyé dans cette session : pas d'autre"}
-    moment = args.get("moment")
+    moment = args.get("moment") or ("ouverture" if on_demand else None)
     if moment not in ("ouverture", "clôture"):
         raise ValueError("moment : « ouverture » ou « clôture »")
-    if moment == "ouverture" and not store.session_opening():
+    if not on_demand and moment == "ouverture" and not store.session_opening():
         return {"ok": False, "error": "l'échange est déjà en cours : un GIF seulement pour ouvrir (premier message) ou clôturer"}
     query = " ".join(str(args.get("query") or "").split())[:50]
     if not query:

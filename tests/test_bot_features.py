@@ -1345,3 +1345,59 @@ def test_meal_variety_and_weekly_discovery(tmp_path, monkeypatch):
     store.log_meal("Dahl de lentilles corail et riz", datetime.datetime(2026, 11, 16, 20, 0, tzinfo=tz))
     ctx = coaching.discovery_context(store.discoveries, store.meals_since(datetime.date(2026, 11, 1)), datetime.date(2026, 11, 16))
     assert "goûté 👍" in ctx
+
+
+def test_meme_command_sends_a_gif_first_even_mid_session(tmp_path, monkeypatch):
+    import dataclasses
+    from running_coach import tools
+    b, store = _bot(tmp_path, monkeypatch)
+    monkeypatch.setattr(tools, "store", store)
+    monkeypatch.setattr(bot_module, "settings", dataclasses.replace(bot_module.settings, giphy_api_key="k"))
+    t0 = datetime.datetime(2026, 11, 13, 18, 0, tzinfo=bot_module.TZ)
+    store.touch_interaction(t0)
+    store.mark_gif(t0)                                                         # session GIF already used
+    store.touch_interaction(t0 + datetime.timedelta(minutes=5))
+
+    class Res:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"data": [{"images": {"downsized_medium": {"url": "https://g/legs.gif"}}}]}
+
+    monkeypatch.setattr(tools.requests, "get", lambda url, timeout=None, params=None: Res())
+    seen = {}
+
+    async def fake_ask(prompt, chat_id, allow_writes=True, planning=False, skip_marker=None, gif_on_demand=False):
+        token = tools.GIF_ON_DEMAND.set(gif_on_demand)
+        ledger = tools.Ledger()
+        seen["ok"] = tools.tool_send_gif({"query": "wobbly legs", "moment": "clôture"}, ledger)["ok"]
+        tools.GIF_ON_DEMAND.reset(token)
+        seen["prompt"] = prompt
+        return agent.AgentReply("Jambes en bois, mais t'y es allé 😂", gif=ledger.actions[0].detail, gif_moment="clôture")
+
+    monkeypatch.setattr(bot_module.agent, "ask", fake_ask)
+    order = []
+
+    async def send_animation(chat_id=None, animation=None):
+        order.append(f"gif {animation}")
+
+    async def reply_animation(url):
+        order.append(f"gif {url}")
+
+    async def fake_send(text, **kwargs):
+        order.append(text.strip())
+
+    b._sender = lambda update=None: fake_send
+    b._keep_typing = lambda update: _noop()
+
+    async def authorized(u):
+        return True
+
+    b._authorized = authorized
+    update = NS(message=NS(), effective_message=NS(reply_animation=reply_animation),
+                effective_chat=NS(id=42, send_action=_noop))
+    asyncio.run(b.on_meme(update, None))
+    assert seen["ok"] and "[/meme]" in seen["prompt"]                        # allowed despite the session rule
+    assert order == ["gif https://g/legs.gif", "Jambes en bois, mais t'y es allé 😂"]   # meme first, caption after
+    assert not tools.tool_send_gif({"query": "x", "moment": "clôture"}, tools.Ledger())["ok"]   # rule back outside /meme

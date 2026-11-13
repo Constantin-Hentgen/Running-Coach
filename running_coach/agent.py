@@ -12,7 +12,7 @@ from . import calendar_store as cs
 from . import coaching, dreeve, dreeve_mcp, weather
 from .config import FR_DAYS_LONG, TZ, TZ_LABEL, UTC, settings
 from .memory import store
-from .tools import ALL_TOOLS, READ_ONLY_TOOLS, Ledger, build_report, run_tool
+from .tools import ALL_TOOLS, GIF_ON_DEMAND, READ_ONLY_TOOLS, Ledger, build_report, run_tool
 
 logger = logging.getLogger(__name__)
 
@@ -359,17 +359,19 @@ async def add_to_history(chat_id: str, note: str, message: str) -> None:
 
 
 async def ask(user_prompt: str, chat_id: str = "default", allow_writes: bool = True,
-              planning: bool = False, skip_marker: str | None = None) -> AgentReply:
+              planning: bool = False, skip_marker: str | None = None, gif_on_demand: bool = False) -> AgentReply:
     """Point d'entrée unique : renvoie le texte à envoyer sur Telegram (compte-rendu inclus) et les propositions.
 
     allow_writes=False : pas d'outils d'écriture d'agenda (mémoire, objectifs, propositions et lecture restent permis).
     planning=True : modèle de planification (CLAUDE_PLANNING_MODEL), pour le bilan de la semaine uniquement.
+    gif_on_demand : l'athlète a demandé un GIF (/meme) : send_gif sans limite de session.
     skip_marker : le prompt permet au modèle de répondre ce seul mot pour « rien à envoyer » (message système non sollicité) :
     réponse vide, et rien n'entre dans l'historique.
     """
     model = settings.planning_model if planning else settings.model
     async with _lock:
         store.touch_interaction(datetime.datetime.now(TZ))
+        GIF_ON_DEMAND.set(gif_on_demand)   # copié dans les threads des outils (asyncio.to_thread)
         ledger = Ledger()
         reply, truncated, error = "", False, None
         try:

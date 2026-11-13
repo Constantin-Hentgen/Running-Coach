@@ -2,6 +2,7 @@
 détection de nouveaux runs avec ressenti, alertes météo."""
 import asyncio
 import contextlib
+import dataclasses
 import datetime
 import functools
 import logging
@@ -482,6 +483,26 @@ class CoachBot:
         await self._ask_and_reply(update, commands.eat_prompt(datetime.datetime.now(TZ)) +
                                   "\nJe veux d'autres idées que celles que tu viens de me proposer.", allow_writes=False)
 
+    async def on_meme(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """/meme : un GIF ou mème qui résume la journée d'entraînement, pour rire."""
+        if not update.message or not await self._authorized(update):
+            return
+        if not settings.giphy_api_key:
+            await self._push("Pour les mèmes, il me faut une clé GIPHY (GIPHY_API_KEY dans la config) 😅")
+            return
+        typing = asyncio.create_task(self._keep_typing(update))
+        try:
+            reply = await agent.ask(commands.MEME_PROMPT, chat_id=str(update.effective_chat.id), allow_writes=False,
+                                    gif_on_demand=True)
+        except Exception:
+            logger.exception("/meme en échec")
+            reply = agent.AgentReply("J'ai pas trouvé de mème à la hauteur de ta journée 🥲 Réessaie ?")
+        finally:
+            typing.cancel()
+        if reply.gif:
+            reply = dataclasses.replace(reply, gif_moment="ouverture")   # le mème d'abord, la légende ensuite
+        await self._deliver(reply, update=update)
+
     async def on_stock(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await self._command(update, lambda: commands.format_stock_reply(store.pantry, datetime.datetime.now(TZ).date()))
 
@@ -959,7 +980,7 @@ def build_bot() -> CoachBot:
     bot = CoachBot(app)
     handlers = {
         "plan": bot.on_agenda, "load": bot.on_form, "runs": bot.on_last_runs, "weather": bot.on_weather,
-        "goals": bot.on_goals, "memory": bot.on_memory, "list": bot.on_list, "recipes": bot.on_recipes, "eat": bot.on_eat, "stock": bot.on_stock, "debrief": bot.on_debrief, "review": bot.on_review,
+        "goals": bot.on_goals, "memory": bot.on_memory, "list": bot.on_list, "recipes": bot.on_recipes, "eat": bot.on_eat, "stock": bot.on_stock, "meme": bot.on_meme, "debrief": bot.on_debrief, "review": bot.on_review,
         "shopping": bot.on_shopping, "briefing": bot.on_briefing, "help": bot.on_help,
     }
     for name, aliases, _ in commands.COMMANDS:

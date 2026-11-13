@@ -29,13 +29,14 @@ COMMANDS = [
     ("recipes", [], "Recettes en boîtes pour ta liste de courses"),
     ("eat", [], "Quoi manger maintenant (stock, heure, entraînement)"),
     ("stock", [], "Ce que tu as en cuisine"),
+    ("meme", [], "Un mème qui résume ta journée d'entraînement"),
     ("briefing", [], "Briefing IA complet et ajustement du programme"),
     ("help", ["start"], "Liste des commandes"),
 ]
 
 BOT_COMMANDS = [BotCommand(name, desc) for name, _, desc in COMMANDS]
 
-HELP_TEXT = """🏃 *Ton coach running*
+HELP_TEXT = """🏃 *Salut, c'est Bob* 🤖
 Écris-moi simplement : « décale ma sortie de samedi », « je suis crevé, allège demain », « planifie ma semaine »…
 
 *Infos instantanées* (sans IA, gratuites)
@@ -52,15 +53,16 @@ HELP_TEXT = """🏃 *Ton coach running*
 /shopping — liste de courses pour 7 jours selon tes objectifs sportifs et santé (/shopping 3 pour 3 jours), à cocher au magasin
 /list — réaffiche ta liste de courses en cours, à cocher
 /recipes — recettes faciles à préparer en boîtes avec ta liste (/recipes new pour en avoir d'autres)
-/eat — quoi manger maintenant, selon ton stock, l'heure et ton entraînement (temps, étapes, ce qu'il faut acheter)
+/eat — quoi manger maintenant : 3 idées (⚡ express, 😌 chill, 🤤 gourmand) selon ton stock et ton entraînement, la recette quand tu choisis
 /stock — ce que tu as en cuisine : les articles cochés sur ta liste y entrent, les plats que tu marques « mangé » ou « cuisiné » en sortent, et je te demande si les produits frais sont encore là quand ils arrivent à échéance
 /briefing — briefing complet, ajuste le programme dans l'agenda
+/meme — un mème qui résume ta journée d'entraînement 😂
 
 /help — cette aide
 
 Tu peux aussi m'envoyer des *vocaux* 🎙️. Quand je propose un changement, des boutons te permettent de l'appliquer.
 
-_Automatique : débrief et ressenti après chaque run, briefing chaque matin, bilan le dimanche soir, alerte météo (pluie, chaleur, vent, verglas) sur tes séances, « encore là ? » sur les produits frais du stock, « qu'as-tu mangé ? » quand je n'ai aucune trace d'un repas._"""
+_Automatique : débrief et ressenti après chaque run, briefing chaque matin, bilan le dimanche soir, alerte météo (pluie, chaleur, vent, verglas) sur tes séances, « encore là ? » sur les produits frais du stock, des idées de plats avant les repas, « tu as mangé quoi ? » quand je n'ai aucune trace d'un repas, et un plat nouveau à découvrir chaque semaine._"""
 
 
 def parse_days(args: list[str], default: int = AGENDA_DEFAULT_DAYS, maximum: int = AGENDA_MAX_DAYS) -> int:
@@ -125,6 +127,14 @@ def eat_prompt(now: datetime.datetime, spontaneous: bool = False) -> str:
         "Tiens compte de ce que j'ai déjà mangé aujourd'hui (repas notés). Ne modifie pas l'agenda."
     )
 
+
+MEME_PROMPT = (
+    "[/meme] Résume ma journée d'entraînement en un GIF ou un mème drôle. Regarde ce qui s'est passé aujourd'hui : "
+    "runs du jour (Dreeve), agenda, ressentis, repas, météo. Trouve l'angle drôle et bienveillant (sortie sous la "
+    "pluie, jambes en bois, repos assumé, gros repas, séance sautée…), appelle send_gif avec 2 à 4 mots-clés en "
+    "anglais qui collent pile à ma journée, et écris UNE seule ligne drôle pour l'accompagner, comme un pote. "
+    "Ne modifie rien."
+)
 
 NEW_DISH_PROMPT = (
     "[Plat découverte de la semaine] Regarde la variété de mes repas (contexte) et propose-moi UN plat nouveau à "
