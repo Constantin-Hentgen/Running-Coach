@@ -86,8 +86,8 @@ _DOW = {"mon": 0, "lun": 0, "tue": 1, "mar": 1, "wed": 2, "mer": 2, "thu": 3, "j
         "fri": 4, "ven": 4, "sat": 5, "sam": 5, "sun": 6, "dim": 6}
 
 
-def _weekly_time(value: str | None) -> tuple[int, int, int] | None:
-    """WEEKLY_REVIEW_TIME : « sun 19:00 » → (jour 0-6, heure, minute) ; off = désactivé."""
+def _weekly_time(value: str | None, name: str = "WEEKLY_REVIEW_TIME") -> tuple[int, int, int] | None:
+    """« sun 19:00 » → (jour 0-6, heure, minute) (WEEKLY_REVIEW_TIME, NEW_DISH_TIME) ; off = désactivé."""
     if not value or value.lower() in ("off", "non", "no", "none", "0"):
         return None
     try:
@@ -96,7 +96,7 @@ def _weekly_time(value: str | None) -> tuple[int, int, int] | None:
         datetime.time(hour, minute)
         return _DOW[day[:3]], hour, minute
     except (ValueError, KeyError):
-        raise ValueError(f"WEEKLY_REVIEW_TIME doit être au format « sun 19:00 » ou « off » (reçu : {value!r})") from None
+        raise ValueError(f"{name} doit être au format « sun 19:00 » ou « off » (reçu : {value!r})") from None
 
 
 def _shopping_url(value: str | None, training_url: str | None) -> str | None:
@@ -163,6 +163,7 @@ class Settings:
     tz: ZoneInfo
     briefing_time: tuple[int, int] | None
     weekly_review: tuple[int, int, int] | None
+    new_dish_time: tuple[int, int, int] | None
     pantry_check_time: tuple[int, int] | None
     shop_last_call: tuple[int, int] | None
     meal_check_times: list[tuple[int, int]]
@@ -214,6 +215,7 @@ class Settings:
             tz=ZoneInfo(_str("COACH_TZ") or _str("TZ") or "Europe/Paris"),
             briefing_time=_briefing_time(_str("BRIEFING_TIME", "08:00")),
             weekly_review=_weekly_time(_str("WEEKLY_REVIEW_TIME", "sun 19:00")),
+            new_dish_time=_weekly_time(_str("NEW_DISH_TIME", "sat 10:00"), "NEW_DISH_TIME"),
             pantry_check_time=_briefing_time(_str("PANTRY_CHECK_TIME", "18:00"), "PANTRY_CHECK_TIME"),
             shop_last_call=_briefing_time(_str("SHOP_LAST_CALL", "19:30"), "SHOP_LAST_CALL"),
             meal_check_times=_meal_times(_str("MEAL_CHECK_TIMES", "10:30,14:30,21:30")),

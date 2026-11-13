@@ -107,6 +107,8 @@ def eat_prompt(now: datetime.datetime, spontaneous: bool = False) -> str:
         "- ⚡ express : prêt en 15 min max, zéro prise de tête (une boîte prête du stock passe en premier ici) ;\n"
         "- 😌 chill : simple et réconfortant, 20 à 40 min tranquille ;\n"
         "- 🤤 gourmand : le plat plaisir, un peu plus d'effort.\n"
+        "Si le plat découverte de la semaine (contexte) n'est pas encore goûté, il peut être l'une des 3 options. "
+        "Varie par rapport à ce qui revient souvent (contexte : variété des repas). "
         "Pense efficacité : un plat qui se cuisine en plus grande quantité pour remplir mes boîtes libres (contexte) est "
         "un bon choix, en restant varié avec ce qui est déjà en boîtes. "
         + ("Je peux encore passer acheter un ou deux trucs si ça vaut le coup. " if shops_open(now) else
@@ -122,6 +124,17 @@ def eat_prompt(now: datetime.datetime, spontaneous: bool = False) -> str:
         "par plat : quand je choisis, je reçois sa recette, ses ingrédients sortent du stock et le repas est noté. "
         "Tiens compte de ce que j'ai déjà mangé aujourd'hui (repas notés). Ne modifie pas l'agenda."
     )
+
+
+NEW_DISH_PROMPT = (
+    "[Plat découverte de la semaine] Regarde la variété de mes repas (contexte) et propose-moi UN plat nouveau à "
+    "découvrir cette semaine : que je n'ai jamais mangé (journal), jamais proposé en découverte avant (contexte), "
+    "simple (40 min max), de saison et qui colle à mes objectifs. Choisis-le pour casser ce qui revient le plus "
+    "souvent. Cherche une recette de base avec search_recipe, puis appelle propose_meal avec discovery: true, `mood`, "
+    "`recipe` (finie par « 📖 » + le lien si tu t'en sers), `uses` et tes estimations. "
+    "Message : 1 ou 2 lignes, comme un pote qui te fait découvrir un truc, avec l'émoji du plat. Ne modifie pas "
+    "l'agenda."
+)
 
 
 def recipes_prompt(lst: dict) -> str:

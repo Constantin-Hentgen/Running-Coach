@@ -107,6 +107,7 @@ class Store:
         state.setdefault("next_pantry_id", 1)
         # journal alimentaire : {id, date, time (HH:MM), text, kcal, protein_g, carbs_g, source}
         state.setdefault("meals", [])
+        state.setdefault("discoveries", [])   # plat nouveau de la semaine : [{title, date}] (jamais reproposé)
         state.setdefault("next_meal_id", 1)
         state.setdefault("meal_checks", {})   # « date créneau » → asked | skipped | answered (question « qu'as-tu mangé ? »)
         for p in state["pantry"]:
@@ -562,6 +563,16 @@ class Store:
             self.state["meals"].sort(key=lambda m: (m["date"], m["time"]))
             self._save()
         return dict(item)
+
+    @property
+    def discoveries(self) -> list[dict]:
+        return [dict(d) for d in self.state["discoveries"]]
+
+    def add_discovery(self, title: str, day: datetime.date) -> None:
+        with self._lock:
+            self.state["discoveries"].append({"title": title, "date": day.isoformat()})
+            self.state["discoveries"] = self.state["discoveries"][-104:]   # deux ans de découvertes
+            self._save()
 
     def meals_since(self, day: datetime.date) -> list[dict]:
         return [dict(m) for m in self.state["meals"] if m["date"] >= day.isoformat()]

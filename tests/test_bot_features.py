@@ -1309,3 +1309,39 @@ def test_search_recipe_caches_and_backs_off_on_429(monkeypatch):
     monkeypatch.setattr(recipes, "_search", refused)
     assert recipes.search("omelette") == [] and recipes.search("crêpes") == []
     assert calls[-1] == "omelette"                                            # backed off: no second call
+
+
+def test_meal_variety_and_weekly_discovery(tmp_path, monkeypatch):
+    from running_coach import tools
+    b, store = _bot(tmp_path, monkeypatch)
+    monkeypatch.setattr(tools, "store", store)
+    tz = bot_module.TZ
+    for d, text in ((10, "🍝 Pâtes au thon, maïs (1 tup, ce midi)"), (11, "Pâtes au thon et ratatouille"),
+                    (12, "pâtes au thon"), (12, "Omelette"), (13, "rien (déjeuner sauté)")):
+        store.log_meal(text, datetime.datetime(2026, 11, d, 12, 30, tzinfo=tz))
+    meals = store.meals_since(datetime.date(2026, 11, 1))
+    assert coaching.dish_key("🍝 Pâtes au thon, maïs (1 tup, ce midi)") == "pâtes au thon"
+    v = coaching.meal_variety(meals, datetime.date(2026, 11, 13))
+    assert "4 repas notés, 2 plats différents" in v and "pâtes au thon ×3" in v
+
+    asked = []
+
+    async def fake_ask(prompt, chat_id, allow_writes=True, planning=False, skip_marker=None):
+        asked.append(prompt)
+        out = tools.tool_propose_meal({"title": "🥘 Dahl de lentilles corail", "recipe": "1. Cuire\n📖 https://x",
+                                       "uses": [], "mood": "chill", "discovery": True}, tools.Ledger())
+        return agent.AgentReply("Cette semaine, on tente un dahl 🥘", meals=[(out["meal_id"], "🥘 Dahl de lentilles corail")])
+
+    monkeypatch.setattr(bot_module.agent, "ask", fake_ask)
+    _at(monkeypatch, 10, 0, day=14)
+    asyncio.run(b.new_dish())
+    assert "[Plat découverte de la semaine]" in asked[0] and "search_recipe" in asked[0]
+    assert [d["title"] for d in store.discoveries] == ["🥘 Dahl de lentilles corail"]
+    assert b.sent[-1][1] is not None and "Dahl" in _buttons(b.sent[-1][1])[0][0]
+    ctx = coaching.discovery_context(store.discoveries, store.meals_since(datetime.date(2026, 11, 1)), datetime.date(2026, 11, 14))
+    assert "pas encore goûté" in ctx
+    asyncio.run(b.new_dish())                                                  # same week: no second discovery
+    assert len(asked) == 1
+    store.log_meal("Dahl de lentilles corail et riz", datetime.datetime(2026, 11, 16, 20, 0, tzinfo=tz))
+    ctx = coaching.discovery_context(store.discoveries, store.meals_since(datetime.date(2026, 11, 1)), datetime.date(2026, 11, 16))
+    assert "goûté 👍" in ctx

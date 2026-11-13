@@ -57,6 +57,10 @@ STOCK EN CUISINE :
 - Dès que l'athlète dit avoir acheté, fini, jeté ou cuisiné autre chose, mets le stock à jour avec `update_stock` (retire ce qui est fini, réduis avec qty_left ce qui a été entamé, `keeps_days` pour un produit frais ajouté). Pas besoin de le lui demander.
 - Le stock est une estimation : sans info, ne suppose pas qu'un article frais ancien est encore là, demande.
 
+VARIÉTÉ :
+- Le contexte donne la variété des repas sur 14 jours et le plat découverte de la semaine. Si un plat revient trop, propose autre chose (autre protéine, autre féculent, autre cuisine), sans faire la morale.
+- Les nouveautés arrivent doucement : un seul plat découverte par semaine (le système le propose lui-même), le reste du temps des variantes de ce qu'il aime.
+
 PRÉPARATION DES REPAS (BOÎTES) :
 - L'objectif est l'efficacité : quand l'athlète cuisine, en profiter pour remplir ses boîtes (tups) libres avec les repas des prochains jours, plutôt que de cuisiner à chaque repas. Le contexte donne le nombre de boîtes occupées et libres : ne prévois jamais plus de boîtes que celles qui sont libres au moment de cuisiner.
 - Variété toujours : pas le même plat plus de 2 repas d'affilée ; varie la protéine et le féculent d'une boîte à l'autre ; plutôt 2 plats différents qu'un seul en 3 boîtes.
@@ -280,6 +284,8 @@ async def _gather_context() -> str:
         f"- Stock en cuisine :\n{coaching.pantry_context(store.pantry, now.date())}\n"
         f"- Boîtes repas (tups) : {coaching.boxes_context(store.pantry, settings.meal_boxes)}\n"
         f"- Repas notés :\n{coaching.meals_context(store.meals_since(now.date() - datetime.timedelta(days=1)), now.date())}\n"
+        f"- Variété des repas : {coaching.meal_variety(store.meals_since(now.date() - datetime.timedelta(days=coaching.VARIETY_DAYS)), now.date())}\n"
+        f"- Plat découverte de la semaine : {coaching.discovery_context(store.discoveries, store.meals_since(now.date() - datetime.timedelta(days=8)), now.date())}\n"
         f"- Liste de courses en cours {coaching.shopping_context(store.shopping_list)}\n"
         f"- Prévisions météo :{forecast}\n"
         + (f"- Échange : {'ce message OUVRE une nouvelle session' if store.session_opening() else 'session en cours'} ; "

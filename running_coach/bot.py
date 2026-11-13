@@ -786,6 +786,20 @@ class CoachBot:
             reply = agent.AgentReply(f"❌ Bilan de la semaine impossible : {type(e).__name__}")
         await self._deliver(reply, header="📊 *Bilan de la semaine*")
 
+    async def new_dish(self) -> None:
+        """Une fois par semaine (NEW_DISH_TIME) : un plat nouveau à découvrir, choisi pour casser la monotonie."""
+        today = datetime.datetime.now(TZ).date()
+        try:
+            last = store.discoveries[-1:]
+            if last and (today - datetime.date.fromisoformat(last[0]["date"])).days < 6:   # une par semaine au plus
+                return
+            reply = await asyncio.wait_for(agent.ask(commands.NEW_DISH_PROMPT, chat_id=self.chat_id, allow_writes=False),
+                                           DEBRIEF_TIMEOUT_S)
+            if reply.text or reply.meals:
+                await self._deliver(reply)
+        except Exception:
+            logger.exception("Plat découverte en échec")
+
     async def check_pantry(self) -> None:
         """Chaque jour : retire ce qui est resté sans réponse, puis demande « Encore là ? » pour les produits frais
         arrivés à échéance (un bouton par article)."""

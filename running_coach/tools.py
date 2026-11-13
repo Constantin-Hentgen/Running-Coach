@@ -188,6 +188,8 @@ def tool_propose_meal(args: dict, ledger: Ledger) -> dict:
         raise ValueError(f"l'athlète n'a que {settings.meal_boxes} boîtes : prévois-en {settings.meal_boxes} au plus "
                          "(ou une autre session de cuisine)")
     mood = args.get("mood") if args.get("mood") in MEAL_MOODS else None
+    if args.get("discovery"):
+        store.add_discovery(title, datetime.datetime.now(cs.TZ).date())
     pid = store.add_proposal(title, kind="meal", uses=uses, makes=makes, recipe=recipe, mood=mood,
                              macros={k: args.get(k) for k in ("kcal", "protein_g", "carbs_g")})
     ledger.record("meal", title, True, detail=str(pid))
@@ -568,6 +570,7 @@ MEAL_TOOL = {
             "makes": {"type": "string", "description": "batch cooking seulement (cuisiné pour plus tard, pas mangé tout "
                       "de suite) : nombre de boîtes, ex: « 2 boîtes » (pas plus que les boîtes libres au moment de cuisiner) ; "
                       "le plat entre alors au stock"},
+            "discovery": {"type": "boolean", "description": "true seulement pour le plat découverte de la semaine"},
             "mood": {"type": "string", "enum": ["express", "chill", "gourmand"],
                      "description": "/eat : l'envie à laquelle ce plat répond (un plat par envie)"},
             "kcal": {"type": "integer", "description": "estimation pour une portion"},

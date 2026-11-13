@@ -260,3 +260,45 @@ def format_adherence(a: dict) -> str:
     for r in a["extra"]:
         lines.append(f"- hors plan : {format_activity(r)[2:]}")
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Variété des repas et plat découverte de la semaine
+# ---------------------------------------------------------------------------
+
+VARIETY_DAYS = 14
+
+
+def dish_key(text: str) -> str:
+    """« 🍝 Pâtes au thon, maïs (1 tup, ce midi) » → « pâtes au thon » : le plat, sans émoji ni détails."""
+    text = re.sub(r"\([^)]*\)", "", text or "")
+    text = re.split(r"[,;+]| et ", text)[0]
+    return " ".join(re.sub(r"[^\w' -]", " ", text.lower()).split())
+
+
+def meal_variety(meals: list[dict], today: datetime.date, days: int = VARIETY_DAYS) -> str:
+    since = (today - datetime.timedelta(days=days)).isoformat()
+    eaten = [m for m in meals if m["date"] > since and not m["text"].startswith("rien (")]
+    if len(eaten) < 3:
+        return "pas assez de repas notés pour juger"
+    counts: dict[str, int] = {}
+    for m in eaten:
+        key = dish_key(m["text"])
+        if key:
+            counts[key] = counts.get(key, 0) + 1
+    top = sorted(counts.items(), key=lambda kv: -kv[1])[:4]
+    repeated = ", ".join(f"{k} ×{n}" for k, n in top if n > 1) or "aucun plat répété"
+    return (f"{days} derniers jours : {len(eaten)} repas notés, {len(counts)} plats différents ; "
+            f"les plus fréquents : {repeated}")
+
+
+def discovery_context(discoveries: list[dict], meals: list[dict], today: datetime.date) -> str:
+    if not discoveries:
+        return "aucune pour l'instant"
+    last = discoveries[-1]
+    key = dish_key(last["title"])
+    tried = bool(key) and any(m["date"] >= last["date"] and key in dish_key(m["text"]) for m in meals)
+    status = "goûté 👍" if tried else "pas encore goûté : il peut être l'une des options de /eat"
+    older = ", ".join(d["title"] for d in discoveries[-6:-1])
+    return (f"cette semaine : {last['title']} (proposé le {last['date']}, {status})"
+            + (f" ; déjà proposés avant (ne pas reproposer) : {older}" if older else ""))
