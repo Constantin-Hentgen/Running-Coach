@@ -98,7 +98,7 @@ def eat_prompt(now: datetime.datetime, spontaneous: bool = False) -> str:
         "propose-moi 2 ou 3 plats variés au choix (dont un express si possible ; une boîte prête au "
         "stock en premier). Pense efficacité : un plat qui se cuisine en plus grande quantité pour remplir mes boîtes "
         "libres (contexte) pour les prochains jours est un bon choix, en restant varié avec ce qui est déjà en boîtes. "
-        "format Telegram très concis, une ligne chacun :\n"
+        "Format : très concis, une ligne par plat, rien d'autre :\n"
         "🍽️ *Le plat* — pourquoi maintenant (lien avec la séance ou l'objectif) · ⏱️ temps · 🛒 ce qu'il faut acheter, "
         "ou « tout en stock ».\n"
         "Pas de recette dans ton message : pour chaque plat, appelle propose_meal avec `recipe` (ingrédients avec "

@@ -15,6 +15,13 @@ def md_unescape(text: str) -> str:
     return _MD_ESCAPED.sub(r"\1", text)
 
 
+def bubbles(text: str) -> list[str]:
+    """Un message par paragraphe (séparés par une ligne vide), comme dans une conversation ; un paragraphe trop long
+    pour Telegram est lui-même découpé."""
+    parts = [p.strip("\n") for p in re.split(r"\n[ \t]*\n", text or "") if p.strip()]
+    return [chunk for p in parts for chunk in split_message(p)]
+
+
 def split_message(text: str, limit: int = TELEGRAM_LIMIT) -> list[str]:
     """Découpe par lignes ; une ligne plus longue que la limite est elle-même coupée."""
     chunks, current = [], ""

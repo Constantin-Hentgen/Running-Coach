@@ -13,44 +13,40 @@ from telegram.ext import Application, CallbackQueryHandler, CommandHandler, Cont
 from . import agent, coaching, commands, dreeve, voice, weather, weather_alerts
 from . import calendar_store as cs
 from .config import TZ, settings
-from .formatting import md_escape, md_unescape, split_message
+from .formatting import bubbles, md_escape, md_unescape, split_message
 from .memory import LEGS, PANTRY_ASK_GRACE_DAYS, store
 
 logger = logging.getLogger(__name__)
 
 MORNING_PROMPT = (
-    "Réalise le briefing matinal. Analyse l'agenda Radicale, la météo, la charge, le volume hebdo, les derniers runs Dreeve, "
-    "mes ressentis et le compte à rebours de mes objectifs, en appliquant tout ce que tu sais de moi. "
+    "Réalise le briefing matinal. Analyse l'agenda Radicale, la météo, la charge, mon historique Dreeve, mes ressentis et "
+    "le compte à rebours de mes objectifs, en appliquant tout ce que tu sais de moi. "
     f"Met à jour / planifie les {settings.planning_horizon_days} prochains jours dans Radicale, en cohérence avec la "
-    "périodisation vers mon objectif principal. "
-    "Fais un résumé Telegram ultra-concis, sobre, avec des descriptions structurées et des émojis."
+    "périodisation vers mon objectif principal.\n"
+    "Puis écris-moi comme un coach par messages : 2 ou 3 messages courts (1 à 2 lignes chacun, séparés par une ligne "
+    "vide) : la séance du jour et l'essentiel pour la réussir (météo, forme) ; ce qui a changé dans l'agenda s'il y a "
+    "lieu. Pas de titres, pas de récapitulatif de la semaine."
 )
 
 DEBRIEF_PROMPT = (
     "{intro} :\n{runs}\n\n"
-    "Fais-moi spontanément un retour de coach, concis et factuel, en 4 blocs courts :\n"
-    "1. 🏃 *La séance* : ce qui était prévu dans l'agenda vs ce que j'ai fait. Regarde tours/splits via Dreeve si utile. "
-    "Si la séance prévue était un jour passé, relis l'agenda de ce jour-là avec list_calendar_events.\n"
-    "2. 📈 *Par rapport à mes performances passées* : compare avec mes séances similaires récentes "
-    "(allure, FC, dénivelé) et la tendance des dernières semaines, en t'appuyant sur les métriques Dreeve ; "
-    "signale un progrès net ou un signal d'alerte.\n"
-    "3. 🔋 *Forme et prochaines séances* : avec la charge (TSB, ratio A/C), mes ressentis, la météo et ce qu'il y a "
-    "dans l'agenda les prochains jours, dis si le programme reste adapté. Si un ajustement est conseillé, "
+    "Fais-moi un retour de coach comme par messages : 2 à 4 messages très courts (1 à 2 lignes chacun, séparés par une "
+    "ligne vide), sans titres :\n"
+    "- comment ça s'est passé par rapport à ce qui était prévu (relis l'agenda du jour avec list_calendar_events si "
+    "besoin, et les tours/splits Dreeve si utile) ;\n"
+    "- le point marquant par rapport à mon historique (progrès net, séance similaire, ou signal d'alerte), seulement "
+    "s'il y en a un ;\n"
+    "- la suite : le programme reste adapté ou pas (charge, ressentis, météo). Si un ajustement est conseillé, "
     "enregistre-le avec propose_change sans le faire.\n"
-    "4. 🎯 *Objectifs* : où j'en suis par rapport à mes objectifs (compte à rebours, phase de préparation) et le point clé "
-    "à travailler ensuite. Si tu ne connais aucun objectif, demande-le-moi en une phrase.\n"
-    "Ne modifie pas l'agenda."
+    "Ne parle des objectifs que si cette séance change quelque chose pour eux. Ne modifie pas l'agenda."
 )
 
 REVIEW_PROMPT = (
     "Fais le bilan de ma semaine. Chiffres calculés par le système (fiables, ne les recalcule pas) :\n{adherence}\n\n"
-    "En 4 blocs courts et factuels :\n"
-    "1. 📊 *La semaine* : régularité (prévu vs fait), volume, intensité, ce qui a manqué et pourquoi c'est important ou non.\n"
-    "2. 🔋 *Forme* : charge Dreeve et ressentis (effort perçu, jambes) : fatigue qui s'accumule ou bonne assimilation ?\n"
-    "3. 🎯 *Objectifs* : où j'en suis (compte à rebours, phase de préparation) et ce que la semaine change.\n"
-    "4. 📅 *Semaine prochaine* : les 2-3 séances clés prévues dans l'agenda et l'intention de la semaine. "
-    "Si le programme mérite un ajustement, enregistre-le avec propose_change sans le faire.\n"
-    "Ne modifie pas l'agenda."
+    "Écris-le comme par messages : 3 ou 4 messages courts (1 à 2 lignes chacun, séparés par une ligne vide), sans "
+    "titres : la semaine en une phrase (régularité, volume, ce qui a manqué) ; la forme (charge et ressentis) ; "
+    "la semaine prochaine (l'intention et la séance clé). Si le programme mérite un ajustement, enregistre-le avec "
+    "propose_change sans le faire. Ne modifie pas l'agenda."
 )
 
 APPLY_PROMPT = "Applique maintenant cette proposition que tu m'as faite et que je valide : {text}"
@@ -71,11 +67,16 @@ PAIN_FOLLOW_UP = ("😬 Où as-tu mal, depuis quand, et est-ce que ça gêne à 
                   "Réponds-moi (texte ou vocal), j'adapterai la suite.")
 
 
-async def send_text(send, text: str, reply_markup=None) -> None:
+BUBBLE_GAP_S = 0.6   # petit temps entre deux messages d'une même réponse, comme quelqu'un qui écrit
+
+
+async def send_text(send, text: str, reply_markup=None, as_bubbles: bool = False) -> None:
     """send : coroutine(text=…, **kwargs), texte toujours nommé (send_message a chat_id lié par partial, reply_text non). Markdown d'abord, texte brut si Telegram refuse le balisage.
     Les boutons éventuels sont attachés au dernier morceau."""
-    chunks = split_message(text)
+    chunks = bubbles(text) if as_bubbles else split_message(text)
     for i, chunk in enumerate(chunks):
+        if as_bubbles and i:
+            await asyncio.sleep(BUBBLE_GAP_S)
         extra = {"reply_markup": reply_markup} if reply_markup is not None and i == len(chunks) - 1 else {}
         try:
             await send(text=chunk, parse_mode=ParseMode.MARKDOWN, **extra)
@@ -241,9 +242,10 @@ class CoachBot:
         footer, markup = "", None
         if reply.meals:
             footer, markup = meal_hint(reply.meals), InlineKeyboardMarkup(meal_rows(reply.meals))
-        text = "\n\n".join(part for part in (header, reply.text, footer) if part)
-        if text:
-            await send_text(self._sender(update), text, markup)
+        body = "\n".join(part for part in (header, reply.text) if part)   # l'en-tête reste sur le premier message
+        text = "\n\n".join(part for part in (body, footer) if part)
+        if text:   # un message par paragraphe : une conversation, pas un pavé
+            await send_text(self._sender(update), text, markup, as_bubbles=True)
         for pid, summary in reply.proposals:
             await send_text(self._sender(update), proposal_bubble(summary), proposal_markup(pid))
         if reply.shopping_list is not None and (lst := store.shopping_list) and lst["id"] == reply.shopping_list:
@@ -854,7 +856,7 @@ class CoachBot:
                 reply = await asyncio.wait_for(agent.ask(prompt, chat_id=self.chat_id, allow_writes=False), DEBRIEF_TIMEOUT_S)
             except Exception:   # l'agent (en échec ou bloqué) ne doit pas faire perdre le récap : au moins les chiffres
                 logger.exception("Débrief de séance : agent en échec, envoi du récap brut")
-                reply = agent.AgentReply(f"{runs_text}\n\n_(Analyse du coach indisponible, demande /debrief pour réessayer.)_")
+                reply = agent.AgentReply(f"{runs_text}\n_(Analyse du coach indisponible, demande /debrief pour réessayer.)_")
             try:
                 await self._deliver(reply, header="⚡ *Nouveau run détecté !*")
             except Exception as e:   # run non marqué comme vu : nouvel essai au prochain passage

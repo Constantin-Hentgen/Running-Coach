@@ -101,11 +101,13 @@ RÉPONDRE À LA QUESTION (jamais d'esquive) :
 - Ambiguïté réelle (deux lectures qui mènent à des actions différentes) : pars sur la lecture la plus probable et dis-le en une ligne (« je pars sur la semaine du 30 nov, dis-moi si tu parlais d'une autre »). Pas de menu d'options a) / b) / c).
 - Une consigne claire s'exécute (ou se challenge, voir EXPERTISE) : on ne la renvoie pas sous forme de question.
 
-STYLE DE CONVERSATION (une discussion fluide sur Telegram, pas un rapport) :
+STYLE DE CONVERSATION (une discussion par messages, comme entre deux personnes, jamais un rapport) :
 - Tutoie toujours l'athlète.
+- Chaque paragraphe (séparé par une ligne vide) part comme un message Telegram distinct. Écris des messages courts : 1 à 3 lignes chacun, une idée par message, 1 à 4 messages par réponse. L'athlète préfère 50 petits messages à un long texte qu'il doit relire.
+- L'essentiel seulement : ne dis pas tout ce que tu sais. Pas de titres, pas de blocs numérotés, pas de récapitulatif. S'il veut le détail, il le demandera.
 - Va droit au but : la réponse d'abord, sans préambule (« Voici ce que je te propose… »), sans reformuler sa demande, sans répéter ce que tu as déjà dit plus haut dans la conversation.
-- Court par défaut : 2 à 6 lignes. Plus long seulement pour un débrief, un bilan, un plan ou si on te le demande.
-- Une seule question à la fois, et seulement si la réponse change vraiment ce que tu vas faire.
+- Un plan (plusieurs séances) : une ligne par séance, rien de plus.
+- Une seule question à la fois, à la fin, et seulement si la réponse change vraiment ce que tu vas faire.
 - Jamais d'UID, d'identifiant technique ni de nom d'outil dans tes réponses.
 - Ne recopie jamais le compte-rendu système ni les « 🧠 Noté » : le système les ajoute lui-même sous ta réponse. Les notes « [Note système…] » de l'historique sont pour toi, pas à recopier.
 - Pas de formule rassurante répétitive (« rien n'est modifié tant que… », « je ne touche à rien ») : le système l'indique déjà.
@@ -149,6 +151,21 @@ DODGE_NUDGE = (
 def dodges_the_question(text: str) -> bool:
     text = (text or "").strip()
     return bool(DODGE_OPENING.search(text[:300])) or len(DODGE_OPTION_MENU.findall(text)) >= 3
+
+
+# Réponse trop longue pour une conversation par messages : on la fait réécrire une fois, plus courte.
+MAX_REPLY_CHARS = 900
+MAX_BUBBLE_CHARS = 400
+TOO_LONG_NUDGE = (
+    "[Système] Ta réponse est trop longue pour une conversation par messages. Réécris-la plus courte : 1 à 4 messages "
+    "de 1 à 3 lignes chacun (séparés par une ligne vide), l'essentiel seulement, sans titres ni récapitulatif. "
+    "N'appelle aucun outil et ne refais aucune action : réécris seulement ton message."
+)
+
+
+def too_long(text: str) -> bool:
+    text = (text or "").strip()
+    return len(text) > MAX_REPLY_CHARS or any(len(p) > MAX_BUBBLE_CHARS for p in re.split(r"\n[ \t]*\n", text))
 
 
 EMPTY_REPLY_NUDGE = "[Système] Ta réponse était vide. Réponds maintenant au message de l'athlète ci-dessus."
@@ -343,6 +360,12 @@ async def ask(user_prompt: str, chat_id: str = "default", allow_writes: bool = T
                 logger.warning("Réponse qui esquive la question : relance")
                 messages += [{"role": "assistant", "content": reply},
                              {"role": "user", "content": DODGE_NUDGE}]
+                retry, truncated = await _run_loop(messages, tools, ledger, model)
+                reply = retry or reply
+            if not truncated and too_long(reply):   # pavé : réécrit une fois en messages courts
+                logger.warning(f"Réponse trop longue ({len(reply)} caractères) : réécriture")
+                messages += [{"role": "assistant", "content": reply},
+                             {"role": "user", "content": TOO_LONG_NUDGE}]
                 retry, truncated = await _run_loop(messages, tools, ledger, model)
                 reply = retry or reply
         except Exception as e:

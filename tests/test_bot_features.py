@@ -43,6 +43,7 @@ def _bot(tmp_path, monkeypatch, runs=(), asked=None, proposals=()):
     b._shopping_sync_lock, b._background = asyncio.Lock(), set()
     b._pending, b._pending_update, b._draining, b._last_message = [], None, False, 0.0
     monkeypatch.setattr(bot_module, "MESSAGE_DEBOUNCE_S", 0)
+    monkeypatch.setattr(bot_module, "BUBBLE_GAP_S", 0)
 
     async def fake_send(text, **kwargs):
         b.sent.append((text, kwargs.get("reply_markup")))
@@ -75,7 +76,7 @@ def test_check_new_activity_debriefs_all_new_runs_once(tmp_path, monkeypatch):
     prompt, allow_writes = asked[0]
     assert allow_writes is False
     assert "2 nouvelles séances" in prompt and prompt.index("Run 2") < prompt.index("Run 3")
-    assert "Objectifs" in prompt and "prochaines séances" in prompt
+    assert "objectifs" in prompt and "messages très courts" in prompt and "sans titres" in prompt
     assert store.last_activity_id == 3
 
 
@@ -1076,8 +1077,9 @@ def test_meal_suggestion_before_eating_and_when_it_stays_quiet(tmp_path, monkeyp
     prompt, allow_writes, marker = calls[-1]
     assert "[Suggestion automatique avant le repas]" in prompt and "bureau" in prompt and "question" in prompt
     assert allow_writes is False and marker == bot_module.commands.NO_SUGGESTION
-    text, markup = b.sent[-1]
-    assert text.startswith("Pour ce midi") and [l for l, _ in _buttons(markup)] == ["🍽️ Omelette"]
+    (text, no_buttons), (hint, markup) = b.sent[-2:]   # sa phrase, puis les plats avec leurs boutons
+    assert text.startswith("Pour ce midi") and no_buttons is None and "Choisis" in hint
+    assert [l for l, _ in _buttons(markup)] == ["🍽️ Omelette"]
 
     asyncio.run(b.suggest_meal())                       # dishes just offered (as after /eat): no second message
     assert len(calls) == 1
@@ -1102,3 +1104,18 @@ def test_eat_suggest_times_setting():
     from running_coach import config
     assert config._meal_times("07:00,11:30,18:30", "EAT_SUGGEST_TIMES") == [(7, 0), (11, 30), (18, 30)]
     assert config._meal_times("off", "EAT_SUGGEST_TIMES") == []
+
+
+
+def test_reply_paragraphs_become_separate_messages(tmp_path, monkeypatch):
+    b, store = _bot(tmp_path, monkeypatch)
+    reply = agent.AgentReply("Bien joué pour ce matin.\n\nAllure régulière, FC basse.\n\nOn garde jeudi ?")
+    asyncio.run(b._deliver(reply, header="⚡ *Nouveau run détecté !*"))
+    assert [t.strip() for t, _ in b.sent] == ["⚡ *Nouveau run détecté !*\nBien joué pour ce matin.",
+                                              "Allure régulière, FC basse.", "On garde jeudi ?"]
+
+
+def test_bubbles_split_on_blank_lines_and_keep_lists_together():
+    from running_coach.formatting import bubbles
+    assert [b.strip() for b in bubbles("A\n\n- un\n- deux\n \nB")] == ["A", "- un\n- deux", "B"]
+    assert bubbles("") == []

@@ -212,7 +212,7 @@ Just talk to it (in French), for example:
 | `/weather` | Forecast for each training place |
 | `/goals` | Your goals with the countdown |
 | `/memory` | Shows everything the coach knows about you, with each memory's number |
-| `/debrief` | AI debrief of your latest run (same 4 parts as the automatic one, read-only), then the check-in if not done yet |
+| `/debrief` | AI debrief of your latest run (same short messages as the automatic one, read-only), then the check-in if not done yet |
 | `/review` | AI review of the current week: planned vs done, form, goals, next week |
 | `/shopping` | AI shopping list for the next 7 days (`/shopping 3` for 3, max 14), built from your sport and health goals, food preferences in memory, and the sessions planned over that period. Planned around 4–6 easy meal-prep recipes. Arrives as a Telegram checklist to tick at the store, headed by **how many days and which meals it covers** and an **estimated cost range** in euros; also saved as an event in your shopping calendar (`RADICALE_SHOPPING_URL`) at your shopping time, e.g. *« mets-la à 15h »* |
 | `/list` | Shows the current shopping checklist again (no AI) |
@@ -253,11 +253,9 @@ To correct the memory: *« oublie le #3 »* (forget #3), or simply say what chan
   - 📍 Travail : ✅ RAS, bonne alternative
   [🔁 Adapter] [👍 Je garde]
   ```
-- **Debrief** within `ACTIVITY_POLL_MINUTES` minutes (default 1) of a new run appearing in Dreeve. Each check is a single Dreeve API call; the model only runs when there is a new run. Several runs imported at once are covered together. The debrief has four short parts:
-  1. 🏃 the run vs what was planned (laps/splits from Dreeve),
-  2. 📈 how it compares with your similar recent runs and recent trend,
-  3. 🔋 your form (TSB, A:C ratio, check-ins) and whether the coming sessions still fit, with any change only *proposed* (buttons),
-  4. 🎯 progress toward your goals (countdown, training phase).
+- **Debrief** within `ACTIVITY_POLL_MINUTES` minutes (default 1) of a new run appearing in Dreeve. Each check is a single Dreeve API call; the model only runs when there is a new run. Several runs imported at once are covered together. The debrief comes as 2 to 4 very short messages, like a chat: how the run went vs what was planned (laps/splits from Dreeve), the notable point vs your history (only if there is one), and whether the coming sessions still fit, with any change only *proposed* (buttons).
+
+  **Short messages everywhere**: every coach reply is sent as several small Telegram messages, one per paragraph (1–3 lines, one idea each), without headings or recaps. A reply that is still too long is rewritten once, shorter.
 
   In debrief mode the coach has **no** calendar write access: use ✅ under a proposal, or reply « ok, fais-le » (ok, do it).
 
@@ -281,7 +279,7 @@ Dreeve is used **read-only**, through two complementary channels:
 
 | Channel | Key | When | Data |
 |---|---|---|---|
-| [REST API](https://docs.dreeve.app/api/) | `drv_…` | Automatically, with every message | Load (CTL, ATL, TSB, A:C ratio, TRIMP, monotony, strain), last 6 weeks' volume, last 10 runs (pace, HR, elevation, ID) |
+| [REST API](https://docs.dreeve.app/api/) | `drv_…` | Automatically, with every message | Load (CTL, ATL, TSB, A:C ratio, TRIMP, monotony, strain), your **whole running history**: totals and records, volume per month since the start, weekly volume over 12 weeks, and one line per run with your notes (the oldest summarized per month past 150 runs) |
 | [MCP server](https://docs.dreeve.app/integrations/mcp/) | `drvm_…` | When the model asks | Every tool the server exposes (all read-only): laps, splits, streams, heart-rate zones, volume, activity search, shoes, streaks, and any performance metrics Dreeve provides. The tool list is logged at startup (`[DREEVE MCP] N outil(s) : …`) |
 
 REST is enough to coach; MCP lets the coach dig deeper (detailed debriefs, paces per zone, Dreeve's own metrics, which it is told to use rather than recompute). If MCP is unavailable, the coach carries on with the REST data.

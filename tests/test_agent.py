@@ -274,3 +274,27 @@ def test_skip_marker_returns_nothing_and_keeps_history_clean(tmp_path, monkeypat
     monkeypatch.setattr(agent, "_client", NS(messages=FakeMessages([skip])))
     reply = asyncio.run(agent.ask("repas ?", chat_id="1", allow_writes=False, skip_marker="PAS_DE_SUGGESTION"))
     assert reply.text == "" and not reply.meals and store.history("1") == []
+
+
+def test_too_long_reply_is_rewritten_once(tmp_path, monkeypatch):
+    store = Store(tmp_path / "state.json")
+    monkeypatch.setattr(agent, "store", store)
+    monkeypatch.setattr(tools, "store", store)
+
+    async def fake_context():
+        return "CONTEXTE"
+
+    async def no_tools():
+        return []
+
+    monkeypatch.setattr(agent, "_gather_context", fake_context)
+    monkeypatch.setattr(dreeve_mcp, "load_tools", no_tools)
+    wall = NS(stop_reason="end_turn", usage=_usage(), content=[NS(type="text", text="Bla bla. " * 120)])
+    short = NS(stop_reason="end_turn", usage=_usage(), content=[NS(type="text", text="Bonne séance.\n\nOn garde jeudi ?")])
+    fake = FakeMessages([wall, short])
+    monkeypatch.setattr(agent, "_client", NS(messages=fake))
+    reply = asyncio.run(agent.ask("ça va ?", chat_id="1"))
+    assert reply.text == "Bonne séance.\n\nOn garde jeudi ?" and len(fake.calls) == 2
+    assert {"role": "user", "content": agent.TOO_LONG_NUDGE} in fake.calls[1]["messages"]
+    assert not agent.too_long("Court.\n\n" + "- séance\n" * 20)
+    assert agent.too_long("x" * 450)
