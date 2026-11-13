@@ -72,15 +72,15 @@ PAIN_FOLLOW_UP = ("😬 Où as-tu mal, depuis quand, et est-ce que ça gêne à 
 
 
 async def send_text(send, text: str, reply_markup=None) -> None:
-    """send : coroutine(text, **kwargs). Markdown d'abord, texte brut si Telegram refuse le balisage.
+    """send : coroutine(text=…, **kwargs), texte toujours nommé (send_message a chat_id lié par partial, reply_text non). Markdown d'abord, texte brut si Telegram refuse le balisage.
     Les boutons éventuels sont attachés au dernier morceau."""
     chunks = split_message(text)
     for i, chunk in enumerate(chunks):
         extra = {"reply_markup": reply_markup} if reply_markup is not None and i == len(chunks) - 1 else {}
         try:
-            await send(chunk, parse_mode=ParseMode.MARKDOWN, **extra)
+            await send(text=chunk, parse_mode=ParseMode.MARKDOWN, **extra)
         except BadRequest:
-            await send(md_unescape(chunk), **extra)
+            await send(text=md_unescape(chunk), **extra)
 
 
 def proposal_bubble(summary: str) -> str:

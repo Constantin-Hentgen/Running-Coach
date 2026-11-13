@@ -988,3 +988,17 @@ def test_debrief_that_hangs_falls_back_to_raw_stats(tmp_path, monkeypatch):
     assert asyncio.run(b.check_new_activity()) is True
     assert "Run 1" in b.sent[0][0] and "indisponible" in b.sent[0][0]
     assert store.last_activity_id == 1 and bot_module.ACTIVITY_STATUS["result"] == "débrief envoyé : 1"
+
+
+
+def test_proactive_messages_reach_send_message_with_bound_chat_id(tmp_path, monkeypatch):
+    """Régression : le texte passé en positionnel tombait sur chat_id (« multiple values for argument 'chat_id' »)."""
+    sent = []
+
+    async def send_message(chat_id, text, parse_mode=None, reply_markup=None):   # même ordre que telegram.Bot
+        sent.append((chat_id, text))
+
+    b = bot_module.CoachBot.__new__(bot_module.CoachBot)
+    b.chat_id, b.app = "42", NS(bot=NS(send_message=send_message))
+    asyncio.run(b._push("⚡ *Nouveau run détecté !*"))
+    assert sent == [("42", "⚡ *Nouveau run détecté !*\n")] or sent == [("42", "⚡ *Nouveau run détecté !*")]
