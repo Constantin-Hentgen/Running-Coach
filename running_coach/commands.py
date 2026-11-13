@@ -114,6 +114,8 @@ def eat_prompt(now: datetime.datetime, spontaneous: bool = False) -> str:
         "Mets un maximum d'émojis pour que je me projette : chaque plat commence par un émoji qui le symbolise, et ses "
         "ingrédients principaux ont le leur. Format : une courte phrase d'intro, puis une ligne par plat, rien d'autre :\n"
         "⚡ 🌮 *Le plat* · 🥚🥔🧀 · ⏱️ temps (· 🛒 ce qu'il faut acheter, seulement s'il manque quelque chose)\n"
+        "Pour chaque plat, cherche d'abord une recette de base avec search_recipe (le nom du plat seulement) : si elle "
+        "colle, simplifie-la et adapte-la à mon stock, et finis la recette par « 📖 » + son lien ; garde-la bien simple. "
         "Pas de recette dans ton message : pour chaque plat, appelle propose_meal avec `mood`, `recipe` (ingrédients avec "
         "quantités pour le repas + les boîtes à remplir, 3 à 6 étapes courtes, et combien de boîtes mettre de côté), les "
         "ingrédients du stock qu'il consomme (`uses`) et ses estimations (kcal, protéines, glucides). J'aurai un bouton "

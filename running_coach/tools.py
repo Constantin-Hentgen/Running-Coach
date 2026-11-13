@@ -6,6 +6,7 @@ import requests
 from dataclasses import dataclass, field
 
 from . import calendar_store as cs
+from . import recipes
 from .coaching import box_count
 from .config import settings
 from .formatting import md_escape
@@ -562,7 +563,8 @@ MEAL_TOOL = {
             "recipe": {"type": "string", "description": "/eat : la recette complète, envoyée seulement quand l'athlète "
                        "choisit ce plat (bouton « choisir ») : ingrédients avec quantités, chacun précédé de son émoji (🌽 maïs, "
                        "🥚 œufs, 🧀 fromage, 🍅 tomates, 🧅 oignon…) et marqué 🛒 s'il faut l'acheter, puis 3 à 6 "
-                       "étapes courtes numérotées ; format Telegram concis. À omettre pour /recipes."},
+                       "étapes courtes numérotées ; format Telegram concis ; « 📖 » + lien en dernière ligne si elle s'appuie sur "
+                       "search_recipe. À omettre pour /recipes."},
             "makes": {"type": "string", "description": "batch cooking seulement (cuisiné pour plus tard, pas mangé tout "
                       "de suite) : nombre de boîtes, ex: « 2 boîtes » (pas plus que les boîtes libres au moment de cuisiner) ; "
                       "le plat entre alors au stock"},
@@ -624,6 +626,30 @@ GIF_TOOL = {
     },
 }
 
+RECIPE_TOOL = {
+    "name": "search_recipe",
+    "description": (
+        "Cherche des recettes de base dans le Livre de cuisine libre de Wikibooks (français, CC BY-SA) : renvoie les plus "
+        "proches avec ingrédients et préparation. Pour /eat, avant d'écrire la recette d'un plat : appuie-toi dessus si "
+        "elle colle, en la simplifiant et en l'adaptant au stock, et termine alors la recette par « 📖 » + son lien. "
+        "Si rien ne colle, écris la recette toi-même, sans lien."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {"query": {"type": "string", "description": "le nom du plat seulement, ex: « tortilla », "
+                                 "« lentilles au thon » (jamais d'info personnelle)"}},
+        "required": ["query"],
+    },
+}
+
+
+def tool_search_recipe(args: dict, ledger: Ledger) -> dict:
+    found = recipes.search(args.get("query", ""))
+    if not found:
+        return {"ok": True, "recipes": [], "note": "rien de proche : écris la recette toi-même, sans lien"}
+    return {"ok": True, "recipes": found}
+
+
 GIPHY_SEARCH_URL = "https://api.giphy.com/v1/gifs/search"
 
 
@@ -652,6 +678,7 @@ def tool_send_gif(args: dict, ledger: Ledger) -> dict:
 
 
 _COMMON = [*MEMORY_TOOLS, *GOAL_TOOLS, PROPOSE_TOOL, *SHOPPING_TOOLS, EDIT_SHOPPING_TOOL, STOCK_TOOL, MEAL_TOOL, LOG_MEAL_TOOL,
+           RECIPE_TOOL,
            *([GIF_TOOL] if settings.giphy_api_key else [])]
 ALL_TOOLS = [LIST_TOOL, *WRITE_TOOLS, *_COMMON]
 READ_ONLY_TOOLS = [LIST_TOOL, *_COMMON]
@@ -672,6 +699,7 @@ _IMPL = {
     "propose_meal": tool_propose_meal,
     "log_meal": tool_log_meal,
     "send_gif": tool_send_gif,
+    "search_recipe": tool_search_recipe,
 }
 
 

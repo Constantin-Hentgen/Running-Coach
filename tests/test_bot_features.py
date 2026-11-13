@@ -1249,3 +1249,63 @@ def test_after_shop_last_call_only_stock(monkeypatch):
     late = commands.eat_prompt(datetime.datetime(2026, 11, 13, 20, 30, tzinfo=tz))
     assert "magasins sont fermés" in late and "acheter un ou deux" not in late
     assert "magasins sont fermés" in commands.eat_prompt(datetime.datetime(2026, 11, 14, 6, 30, tzinfo=tz))
+
+
+def test_search_recipe_returns_open_recipes_without_summary_pages(monkeypatch):
+    from running_coach import recipes, tools
+    calls = []
+
+    class Res:
+        def __init__(self, data):
+            self.data = data
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return self.data
+
+    def fake_get(url, params=None, headers=None, timeout=None):
+        calls.append(params)
+        assert "running-coach" in headers["User-Agent"]
+        if params.get("list") == "search":
+            return Res({"query": {"search": [{"title": "Livre de cuisine/Recettes végétariennes"},
+                                             {"title": "Apprendre à cuisiner/Les bases"},
+                                             {"title": "Livre de cuisine/Tortilla"}]}})
+        return Res({"query": {"pages": {"1": {"title": "Livre de cuisine/Tortilla",
+                                              "extract": "== Ingrédients ==\n6 œufs\n\n\n\n== Préparation ==\nCuire."}}}})
+
+    monkeypatch.setattr(recipes.requests, "get", fake_get)
+    monkeypatch.setattr(recipes, "_cache", {})
+    monkeypatch.setattr(recipes, "_blocked_until", 0.0)
+    out = tools.tool_search_recipe({"query": "tortilla pommes de terre"}, tools.Ledger())
+    (r,) = out["recipes"]
+    assert r["title"] == "Tortilla" and r["url"] == "https://fr.wikibooks.org/wiki/Livre_de_cuisine/Tortilla"
+    assert "6 œufs" in r["text"] and "\n\n\n" not in r["text"]
+    assert calls[0]["srsearch"] == "intitle:tortilla intitle:pommes intitle:terre"   # titre d'abord
+    assert calls[-1]["titles"] == "Livre de cuisine/Tortilla"
+    assert "search_recipe" in bot_module.commands.eat_prompt(datetime.datetime(2026, 11, 13, 18, 0, tzinfo=bot_module.TZ))
+
+
+
+def test_search_recipe_caches_and_backs_off_on_429(monkeypatch):
+    import requests as rq
+    from running_coach import recipes
+    monkeypatch.setattr(recipes, "_cache", {})
+    monkeypatch.setattr(recipes, "_blocked_until", 0.0)
+    calls = []
+
+    def ok(query):
+        calls.append(query)
+        return [{"title": "Tortilla", "url": "u", "text": "t"}]
+
+    monkeypatch.setattr(recipes, "_search", ok)
+    assert recipes.search("Tortilla") == recipes.search("tortilla") and calls == ["Tortilla"]   # cache
+
+    def refused(query):
+        calls.append(query)
+        raise rq.HTTPError(response=NS(status_code=429))
+
+    monkeypatch.setattr(recipes, "_search", refused)
+    assert recipes.search("omelette") == [] and recipes.search("crêpes") == []
+    assert calls[-1] == "omelette"                                            # backed off: no second call
