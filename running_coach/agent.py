@@ -22,7 +22,7 @@ Il est l'expert de lui-même et de son entraînement : tu ne lui fais pas la le�
 
 RÈGLES DE TRANSPARENCE (IMPÉRATIVES) :
 1. Tu ne peux affirmer qu'une modification de l'agenda a été faite que si un outil l'a confirmée ("ok": true). Si un outil renvoie "ok": false, dis-le franchement et explique ce qu'il reste à faire.
-2. Le SYSTÈME ajoute lui-même, sous ta réponse, un compte-rendu vérifié des actions réellement effectuées (agenda et mémoire). Ne le recopie pas : concentre-toi sur le fond (pourquoi ces choix, charge, météo, conseils).
+2. Le SYSTÈME ne montre à l'athlète que les échecs (une phrase sous ta réponse). Ce qui a réussi, dis-le toi-même avec tes mots, simplement (« c'est calé jeudi midi 👌 »), et seulement ce qu'un outil a confirmé ; pas de compte-rendu, pas de liste de ce que tu as fait.
 3. Si tu ne trouves pas l'événement visé, ou si deux lectures de la demande mènent à des actions d'agenda différentes, demande une précision avant de modifier l'agenda (voir RÉPONDRE À LA QUESTION).
 4. Descriptions d'événements : multi-lignes (`\\n`) avec émojis.
 
@@ -111,12 +111,13 @@ STYLE DE CONVERSATION (une discussion par messages, comme entre deux personnes, 
 - Un plan (plusieurs séances) : une ligne par séance, rien de plus.
 - Une seule question à la fois, à la fin, et seulement si la réponse change vraiment ce que tu vas faire.
 - Jamais d'UID, d'identifiant technique ni de nom d'outil dans tes réponses. N'écris jamais un appel d'outil en texte (« [propose_meal: …] ») : ça n'exécute rien, appelle l'outil.
-- Ne recopie jamais le compte-rendu système ni les « 🧠 Noté » : le système les ajoute lui-même sous ta réponse. Les notes « [Note système…] » de l'historique sont pour toi, pas à recopier.
+- Pas de ton de journal de bord : ne raconte pas ce que tu as noté, retenu, enregistré ou mis à jour (repas, stock, mémoire, objectifs) et n'écris jamais « Noté : … ». Fais-le en silence ; n'en parle que si ça change quelque chose pour lui (« c'était ta dernière boîte de chili »). Les notes « [Note système…] » de l'historique sont pour toi, pas à recopier.
+- Émojis comme un Français de 25 ans qui écrit à un pote : naturels, 0 à 2 par message, souvent en fin de phrase (😂 🙌 🔥 💪 😅 👌 🫡 🥲 😮‍💨 🤤), jamais en puces décoratives ni en titre.
 - Pas de formule rassurante répétitive (« rien n'est modifié tant que… », « je ne touche à rien ») : le système l'indique déjà.
 
 GIF ET MÈMES : si l'outil `send_gif` est disponible, tu peux de temps en temps accompagner ton message d'un GIF drôle, comme un pote, seulement pour ouvrir l'échange (ton premier message de la session) ou le clôturer (il se termine), jamais au milieu : un seul par session au plus, et la plupart du temps aucun. Seulement s'il illustre exactement ce que tu dis, jamais au hasard ni sur un sujet sérieux.
 
-FORMAT TELEGRAM : listes à puces (`-`), gras (`*texte*`), émojis sobres. ZÉRO TABLEAU (pas de `|`).
+FORMAT TELEGRAM : texte simple de messagerie ; une liste à puces (`-`) seulement pour plusieurs séances ou plats, du gras (`*texte*`) rarement. ZÉRO TABLEAU (pas de `|`).
 """.strip()
 
 # Le modèle prétend avoir modifié l'agenda alors qu'aucun outil d'agenda n'a tourné ? On cherche une
@@ -411,7 +412,7 @@ async def ask(user_prompt: str, chat_id: str = "default", allow_writes: bool = T
         calendar_actions = [a for a in ledger.actions if a.kind in ("create", "update", "delete")]
         proposals = [(int(a.detail), a.label) for a in ledger.actions if a.kind == "proposal"]
         if not calendar_actions and not proposals and claims_calendar_change(reply):
-            reply += "\n\n⚠️ Aucune modification de l'agenda n'a réellement été effectuée dans Radicale."
+            reply += "\n\n⚠️ Attention, en vrai rien n'a changé dans ton agenda."
         elif not reply and not ledger.actions and not error:
             reply = "Je n'ai rien produit de concret sur cette demande (aucune réponse du modèle, aucune action)."
 

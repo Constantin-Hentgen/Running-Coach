@@ -61,8 +61,7 @@ def merge_messages(texts: list[str]) -> str:
             + "\n".join(f"{i}. {t}" for i, t in enumerate(texts, 1)))
 
 
-PAIN_FOLLOW_UP = ("😬 Où as-tu mal, depuis quand, et est-ce que ça gêne à la marche ? "
-                  "Réponds-moi (texte ou vocal), j'adapterai la suite.")
+PAIN_FOLLOW_UP = "T'as mal où, et depuis quand ? Ça gêne à la marche ?"
 
 
 BUBBLE_GAP_S = 1.0          # pause minimale avant chaque message suivant d'une réponse
@@ -104,7 +103,7 @@ def proposal_markup(pid) -> InlineKeyboardMarkup:
                                   InlineKeyboardButton("❌ Non", callback_data=f"p:x:{pid}")]])
 
 
-PROPOSAL_OUTCOME = {"a": "✅ C'est parti.", "e": "✏️ À modifier : dis-moi quoi.", "x": "❌ On garde le programme tel quel."}
+PROPOSAL_OUTCOME = {"a": "C'est parti 👌", "e": "Ok, dis-moi ce que tu veux changer 👂", "x": "Ok, on garde comme ça 👍"}
 
 
 def without_proposal(markup: InlineKeyboardMarkup | None, pid: str) -> InlineKeyboardMarkup | None:
@@ -566,12 +565,12 @@ class CoachBot:
             await agent.add_to_history(self.chat_id, f"[L'athlète veut ajuster ta proposition : {item['text']}]",
                                        "Dis-moi ce que tu veux changer.")
             if item["kind"] == "weather":
-                await self._push("✏️ Dis-moi ce que tu veux changer (texte ou vocal), je m'adapte.")
+                await self._push("Ok, dis-moi ce que tu veux changer 👂")
         else:
             await agent.add_to_history(self.chat_id, f"[L'athlète a ignoré ta proposition : {item['text']}]",
                                        "D'accord, on garde le programme tel quel.")
             if item["kind"] == "weather":
-                await self._push("👍 On garde le programme tel quel.")
+                await self._push("Ok, on garde comme ça 👍")
 
     async def _on_meal(self, update: Update, mid: str) -> None:
         """Plat mangé / cuisiné : ses ingrédients sortent du stock (ou passent à ce qu'il en reste)."""
@@ -597,18 +596,13 @@ class CoachBot:
         if item.get("makes"):   # batch cooking : les boîtes entrent au stock, rien n'est encore mangé
             store.update_pantry(add=[{"name": item["text"], "qty": item["makes"], "keeps_days": 4, "boxes": True}])
             changes.append(f"+{item['text']} ({item['makes']})")
-            text = (f"🍳 *{md_escape(item['text'])}* cuisiné.\n"
-                    f"📦 Boîtes : {md_escape(coaching.boxes_context(store.pantry, settings.meal_boxes))}")
+            text = f"Top, {md_escape(item['makes'])} de côté pour les prochains jours 🙌"
         else:                   # mangé : entre dans le journal alimentaire
             macros = item.get("macros") or {}
             store.log_meal(item["text"], datetime.datetime.now(TZ), source="bouton", **macros)
-            text = f"🍽️ *{md_escape(item['text'])}* noté."
-        if changes:
-            text += f"\n🥫 Stock : {md_escape(', '.join(changes))}"
-        if r["not_found"]:
-            text += f"\n_Pas dans le stock : {md_escape(', '.join(r['not_found']))}_"
-        if item.get("recipe"):
-            text = f"{text}\n\n{item['recipe']}"
+            text = "Bon app' 😋"
+        if item.get("recipe"):   # plat choisi : la recette, simplement
+            text = f"Bon choix 😋 *{md_escape(item['text'])}*, voilà comment faire :\n\n{item['recipe']}"
         await self._push(text)
         await agent.add_to_history(self.chat_id, f"[L'athlète a confirmé avoir mangé / cuisiné : {item['text']}]", md_unescape(text))
 
@@ -619,11 +613,13 @@ class CoachBot:
         close_meal_guesses(query.message.reply_markup)
         macros = item.get("macros") or {}
         store.log_meal(item["text"], datetime.datetime.fromisoformat(item["at"]), source="bouton", **macros)
-        text = f"👍 {md_escape(item['text'])}, noté."
-        if r["updated"]:
-            text += f" Il reste : {md_escape(', '.join(r['updated']))}."
-        elif any(u.get("name", "").casefold() == item["text"].casefold() for u in item.get("uses") or []) and r["removed"]:
-            text += " C'était la dernière boîte."
+        box = next((u for u in item.get("uses") or [] if u.get("name", "").casefold() == item["text"].casefold()), None)
+        if box and box.get("qty_left"):
+            text = f"😋 Il t'en reste {md_escape(box['qty_left'])}."
+        elif box and r["removed"]:
+            text = "😋 C'était la dernière boîte !"
+        else:
+            text = "Bon app' 😋"
         await query.edit_message_reply_markup(None)
         await self._push(text)
         await agent.add_to_history(self.chat_id, f"[L'athlète a répondu avoir mangé : {item['text']}]", md_unescape(text))
@@ -639,10 +635,10 @@ class CoachBot:
             at = datetime.datetime.combine(datetime.date.fromisoformat(day), end, tzinfo=TZ)
             store.log_meal(f"rien ({slot} sauté)", at, source="bouton", kcal=0, protein_g=0, carbs_g=0)
             store.set_meal_check(key, "answered")
-            text = f"🙅 Noté : {slot} sauté."
+            text = "Ça arrive 😅 Pense à bien manger au prochain repas."
         else:
             store.set_meal_check(key, "skipped")
-            text = "⏭️ D'accord, on passe."
+            text = "Ok 👌"
         await query.edit_message_reply_markup(None)
         await self._push(text)
         await agent.add_to_history(self.chat_id, f"[Réponse à « qu'as-tu mangé ? » ({slot})]", text)
@@ -657,7 +653,7 @@ class CoachBot:
             await query.answer(f"{item['name']} : encore là 👍" if still_there else f"{item['name']} : retiré du stock 🗑️")
         markup = without_button(query.message.reply_markup, f"k:y:{pantry_id}")
         if markup is None:
-            await query.edit_message_text("🥫 Stock vérifié ✅")
+            await query.edit_message_text("Merci 🙏")
         else:
             await query.edit_message_reply_markup(markup)
 
@@ -701,12 +697,12 @@ class CoachBot:
             rpe = int(value)
             store.set_checkin(activity_id, rpe=rpe)
             await query.edit_message_text(
-                f"📝 Effort noté : *{rpe}/10* ({coaching.RPE_LABELS[rpe]})\n🦵 Et les jambes ?",
+                f"{rpe}/10, ok 👌 Et les jambes ?",
                 parse_mode=ParseMode.MARKDOWN, reply_markup=legs_markup(activity_id))
         elif step == "l" and value in LEGS:
             item = store.set_checkin(activity_id, legs=value)
             rpe = f"effort {item['rpe']}/10, " if item.get("rpe") else ""
-            await query.edit_message_text(f"📝 Ressenti noté : {rpe}jambes {LEGS[value]} ✅")
+            await query.edit_message_text("Merci 🙏" if value != "douleur" else "Aïe 😬")
             if value == "douleur":
                 await agent.add_to_history(self.chat_id, "[Ressenti après séance : douleur signalée]", PAIN_FOLLOW_UP)
                 await self._push(PAIN_FOLLOW_UP)
@@ -721,8 +717,7 @@ class CoachBot:
             return
         store.set_checkin(activity_id, date=(run.get("startDateLocal") or "")[:10] or None,
                           minutes=round((run.get("movingTimeInSeconds") or 0) / 60), name=run.get("name"))
-        await self._push(f"📝 *Ton ressenti sur « {md_escape(run.get('name') or 'ta séance')} »*\n"
-                         "Effort perçu, de 1 (très facile) à 10 (maximal) :", rpe_markup(activity_id))
+        await self._push("Alors, t'as senti comment ? Effort de 1 (tranquille) à 10 (à bloc) :", rpe_markup(activity_id))
 
     # --- Tâches planifiées ---------------------------------------------------
 
@@ -889,9 +884,10 @@ class CoachBot:
                 reply = await asyncio.wait_for(agent.ask(prompt, chat_id=self.chat_id, allow_writes=False), DEBRIEF_TIMEOUT_S)
             except Exception:   # l'agent (en échec ou bloqué) ne doit pas faire perdre le récap : au moins les chiffres
                 logger.exception("Débrief de séance : agent en échec, envoi du récap brut")
-                reply = agent.AgentReply(f"{runs_text}\n_(Analyse du coach indisponible, demande /debrief pour réessayer.)_")
+                reply = agent.AgentReply(f"J'ai vu passer ta sortie 🏃 mais j'ai pas réussi à la regarder en détail 🥲 "
+                                         f"Tape /debrief pour réessayer.\n{runs_text}")
             try:
-                await self._deliver(reply, header="⚡ *Nouveau run détecté !*")
+                await self._deliver(reply)   # Bob réagit lui-même à la sortie, sans en-tête de notification
             except Exception as e:   # run non marqué comme vu : nouvel essai au prochain passage
                 logger.exception("Débrief de séance : envoi Telegram en échec, nouvel essai au prochain passage")
                 ACTIVITY_STATUS.update(result="envoi Telegram en échec", error=str(e))

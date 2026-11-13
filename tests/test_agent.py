@@ -61,7 +61,8 @@ def test_ask_learns_preference_and_routes_mcp(tmp_path, monkeypatch):
 
     out = asyncio.run(agent.ask("Je préfère faire mon fractionné le mardi soir", chat_id="42")).text
 
-    assert "🧠 Noté" in out and "fractionné le mardi soir" in out
+    assert out == "C'est noté, on garde ça." and "🧠" not in out   # pas de journal de bord sous le message
+    assert any("fractionné le mardi soir" in m["text"] for m in store.memories)
     assert "Aucune modification" not in out
     assert FakeMcpRun.calls == [("dreeve_get_activity_splits", {"activityId": "activity-1"})]
     assert any("mardi soir" in m["text"] for m in store.memories)

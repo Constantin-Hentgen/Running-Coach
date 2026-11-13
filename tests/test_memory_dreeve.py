@@ -87,8 +87,7 @@ def test_memory_tools_go_through_ledger_and_report(store):
     assert run_tool("forget", {"id": res["id"]}, ledger, allowed)["ok"]
     assert run_tool("forget", {"id": 12345}, ledger, allowed)["ok"] is False
     report = build_report(ledger, truncated=False)
-    assert "🧠 Noté" in report and "🗑️ Oublié" in report
-    assert "Compte-rendu Radicale" not in report   # pas d'action agenda → pas de section agenda
+    assert report == ""   # mémoire mise à jour en silence
 
 
 # --- Dreeve REST ----------------------------------------------------------------

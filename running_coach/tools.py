@@ -684,34 +684,23 @@ def run_tool(name: str, args: dict, ledger: Ledger, allowed: set[str]) -> dict:
 # ---------------------------------------------------------------------------
 
 _VERBS = {"create": "Créé", "update": "Modifié", "delete": "Supprimé"}
+_FAILED_VERBS = {"create": "ajouter", "update": "modifier", "delete": "supprimer"}
 _MEMORY_ICONS = {"remember": "🧠 Noté", "forget": "🗑️ Oublié", "goal": "🎯 Objectif enregistré", "goal_remove": "🏁 Objectif retiré"}
 
 
 def build_report(ledger: Ledger, truncated: bool, error: str | None = None) -> str:
+    """Ce que l'athlète voit du système sous le message de Bob : rien quand tout s'est bien passé (Bob le dit avec ses
+    mots), une phrase simple pour chaque échec, qui n'est jamais caché."""
     lines = []
-    calendar = [a for a in ledger.actions if a.kind in _VERBS]
-    memory = [a for a in ledger.actions if a.kind in _MEMORY_ICONS]
-    if calendar:
-        ok = [a for a in calendar if a.ok]
-        ko = [a for a in calendar if not a.ok]
-        lines.append("*📋 Compte-rendu Radicale (relu sur le serveur)*")
-        lines += [f"- ✅ {_VERBS[a.kind]} : {md_escape(a.label)}" for a in ok]
-        lines += [f"- ❌ ÉCHEC ({_VERBS[a.kind].lower()}) : {md_escape(a.label)} — {md_escape(a.detail)}" for a in ko]
-        lines.append(f"_{len(ok)} réussie(s), {len(ko)} échec(s)_")
-    if memory:
-        lines += [f"{_MEMORY_ICONS[a.kind]} : {md_escape(a.label)}" for a in memory]
     for a in ledger.actions:
-        if a.kind == "meal_log":
-            lines.append(f"🍽️ Repas noté : {md_escape(a.label)}")
-        if a.kind == "stock":
-            lines.append(f"🥫 Stock : {md_escape(a.label)}")
-        if a.kind == "shopping_edit":
-            lines.append(f"✏️ Liste de courses modifiée : {md_escape(a.label)}")
-        if a.kind == "shopping_event":
-            lines.append(f"📅 Liste de courses ajoutée à l'agenda courses : {md_escape(a.label)}" if a.ok
-                         else f"❌ Liste de courses non ajoutée à l'agenda courses : {md_escape(a.detail)}")
+        if a.ok:
+            continue
+        if a.kind in _VERBS:
+            lines.append(f"⚠️ J'ai pas réussi à {_FAILED_VERBS[a.kind]} « {md_escape(a.label)} » dans ton agenda. On réessaie ?")
+        elif a.kind == "shopping_event":
+            lines.append("⚠️ J'ai pas réussi à mettre ta liste de courses dans l'agenda courses.")
     if truncated:
-        lines.append("⚠️ Traitement interrompu (limite atteinte) : l'opération est peut-être incomplète, vérifie l'agenda.")
+        lines.append("⚠️ J'ai dû m'arrêter en route, jette un œil à ton agenda pour vérifier.")
     if error:
-        lines.append(f"⚠️ Erreur technique en cours de route : {md_escape(error)}")
+        lines.append("⚠️ J'ai eu un bug en route 🥲 Réessaie ?")
     return "\n".join(lines)

@@ -102,9 +102,10 @@ def test_build_report_escapes_and_counts():
     ledger.record("create", "Sortie_longue", True)
     ledger.record("delete", "Repos", False, "boom")
     report = build_report(ledger, truncated=True)
-    assert "Sortie\\_longue" in report
-    assert "1 réussie(s), 1 échec(s)" in report
-    assert "interrompu" in report
+    assert "Sortie" not in report                                               # la réussite n'est pas listée
+    assert "J'ai pas réussi à supprimer « Repos » dans ton agenda" in report and "m'arrêter en route" in report
+    assert "boom" not in report                                                # pas de détail technique
+    assert "vérifier" in report
 
 
 def test_build_report_empty():

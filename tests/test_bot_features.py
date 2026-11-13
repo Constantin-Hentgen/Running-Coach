@@ -71,8 +71,8 @@ def test_check_new_activity_debriefs_all_new_runs_once(tmp_path, monkeypatch):
     assert sorted(asyncio.run(both())) == [False, True]
     assert len(asked) == 1
     debrief, checkin = b.sent   # débrief, puis ressenti sur le dernier run
-    assert debrief[0].startswith("⚡ *Nouveau run détecté !*") and debrief[1] is None
-    assert "Run 3" in checkin[0] and ("10", "c:r:3:10") in _buttons(checkin[1])
+    assert debrief[0].strip() == "débrief" and debrief[1] is None             # pas d'en-tête « nouveau run »
+    assert "t'as senti comment" in checkin[0] and ("10", "c:r:3:10") in _buttons(checkin[1])   # sur le dernier run
     prompt, allow_writes = asked[0]
     assert allow_writes is False
     assert "2 nouvelles séances" in prompt and prompt.index("Run 2") < prompt.index("Run 3")
@@ -92,8 +92,8 @@ def test_check_new_activity_sends_raw_recap_when_agent_fails(tmp_path, monkeypat
     monkeypatch.setattr(bot_module.agent, "ask", broken_ask)
     assert asyncio.run(b.check_new_activity()) is True
     recap, checkin = b.sent
-    assert recap[0].startswith("⚡ *Nouveau run détecté !*") and "Run 2" in recap[0] and "/debrief" in recap[0]
-    assert "Run 2" in checkin[0]
+    assert recap[0].startswith("J'ai vu passer ta sortie") and "Run 2" in recap[0] and "/debrief" in recap[0]
+    assert "c:r:2:10" in [d for _, d in _buttons(checkin[1])]
     assert store.last_activity_id == 2
 
 
@@ -113,7 +113,7 @@ def test_check_new_activity_retries_when_telegram_fails(tmp_path, monkeypatch):
 
     b._sender = sender
     assert asyncio.run(b.check_new_activity()) is True
-    assert b.sent[0][0].startswith("⚡") and "Run 2" in b.sent[1][0] and store.last_activity_id == 2
+    assert b.sent[0][0].strip() == "débrief" and "c:r:2:10" in [d for _, d in _buttons(b.sent[1][1])] and store.last_activity_id == 2
 
 
 
@@ -218,7 +218,7 @@ def test_proposal_buttons_apply_once(tmp_path, monkeypatch):
     assert [label for label, _ in _buttons(markup)] == ["✅ Oui, vas-y", "✏️ Modifier", "❌ Non"]
 
     q = _click(b, f"p:a:{pid}", markup)
-    assert q.edits == [("💡 Déplacer le fractionné de mardi à mercredi 18:30\n✅ C'est parti.", None)]   # choix affiché, plus de boutons
+    assert q.edits == [("💡 Déplacer le fractionné de mardi à mercredi 18:30\nC'est parti 👌", None)]   # choix affiché, plus de boutons
     prompt, allow_writes = asked[-1]
     assert allow_writes is True and "Déplacer le fractionné de mardi à mercredi 18:30" in prompt
     n = len(asked)
@@ -230,7 +230,7 @@ def test_proposal_ignore_and_weather_adapt(tmp_path, monkeypatch):
     b, store = _bot(tmp_path, monkeypatch, asked=asked)
     pid = store.add_proposal("Décale la sortie longue")
     q = _click(b, f"p:x:{pid}", bot_module.proposal_markup(pid))
-    assert store.proposal(pid)["status"] == "ignored" and not asked and "On garde" in q.edits[-1][0]
+    assert store.proposal(pid)["status"] == "ignored" and not asked and "on garde" in q.edits[-1][0]
     wid = store.add_proposal("Alerte météo sur ma séance … Adapte-la au mieux", kind="weather")
     _click(b, f"p:a:{wid}")
     assert asked[-1][0] == "Alerte météo sur ma séance … Adapte-la au mieux"   # le texte EST la demande
@@ -246,7 +246,7 @@ def test_checkin_flow_rpe_then_legs_and_pain_follow_up(tmp_path, monkeypatch):
     _click(b, "c:l:7:douleur")
     item = store.state["checkins"]["7"]
     assert item == {"date": "2026-11-08", "minutes": 50, "name": "Run 7", "rpe": 8, "legs": "douleur"}
-    assert "Où as-tu mal" in b.sent[-1][0]
+    assert "T'as mal où" in b.sent[-1][0]
     n = len(b.sent)
     asyncio.run(b._ask_checkin(_run(7), only_if_missing=True))   # déjà noté : on ne redemande pas
     assert len(b.sent) == n
@@ -329,7 +329,7 @@ def test_shopping_tool_checklist_and_calendar_event(tmp_path, monkeypatch):
     assert (local.hour, local.minute, (end - start).seconds) == (15, 0, 1800)   # 30 min par défaut
     assert items[0] == {"name": "Bananes", "qty": "7", "aisle": "🥦 Fruits et légumes", "keeps": None, "done": False}
     assert store.shopping_list["event_uid"] == "u@running-coach-shopping" and out["calendar"]["previous_list_replaced"] == 1
-    assert "📅 Liste de courses ajoutée à l'agenda courses : lun 09/11 15:00–15:30" in tools.build_report(ledger, False)
+    assert tools.build_report(ledger, False) == ""                          # réussite : pas de compte-rendu
     assert [a.detail for a in ledger.actions if a.kind == "shopping"] == [str(store.shopping_list["id"])]
 
     prompt = commands.shopping_prompt(7, datetime.date(2026, 11, 9), save_to_calendar=True)
@@ -545,7 +545,7 @@ def test_update_stock_tool_add_remove_partial_and_report(tmp_path, monkeypatch):
         {"name": "cabillaud"}, {"name": "Œufs", "qty_left": "2"}, {"name": "Pâtes"}]}, ledger)
     assert out["removed"] == ["Cabillaud"] and out["updated"] == ["Œufs (2)"] and out["not_found"] == ["Pâtes"]
     assert {p["name"]: p["qty"] for p in store.pantry} == {"Riz": "1 kg", "Œufs": "2", "Pain": None}
-    assert "🥫 Stock : +Pain, −Cabillaud, Œufs (2)" in tools.build_report(ledger, False)
+    assert tools.build_report(ledger, False) == ""                          # le stock se met à jour en silence
 
 
 def test_pantry_context_shows_age_and_stock_reply(tmp_path):
@@ -611,7 +611,7 @@ def test_edit_shopping_list_checks_removes_adds_and_syncs_event(tmp_path, monkey
     # Agenda courses mis à jour, checklist renvoyée, compte-rendu
     assert synced[-1][0] == "uid-courses" and "✅ Bananes — 7" in synced[-1][1] and "Riz" not in synced[-1][1]
     assert [a.detail for a in ledger.actions if a.kind == "shopping"] == [str(new["id"])]
-    assert "✏️ Liste de courses modifiée : ✅ Bananes, ✅ Thon en boîte, −Riz, +Pain" in tools.build_report(ledger, False)
+    assert tools.build_report(ledger, False) == ""
 
 
 def test_shopping_list_is_in_the_coach_context(tmp_path):
@@ -665,7 +665,7 @@ def test_meal_button_removes_ingredients_once(tmp_path, monkeypatch):
     q = _click(b, f"m:{mid}", markup)
     assert {p["name"]: p["qty"] for p in store.pantry} == {"Riz": "700 g", "Pain": None}
     assert _buttons(q.edits[-1][1]) == [("✅ Tartines", f"m:{other}")]        # seul le bouton touché disparaît
-    assert "−Saumon, Riz (700 g)" in b.sent[-1][0] and "Avocat" in b.sent[-1][0]
+    assert b.sent[-1][0].strip() == "Bon app' 😋"                               # pas de détail du stock
     assert _click(b, f"m:{mid}").answers == ["Déjà noté."]                    # double clic sans effet
     assert {p["name"] for p in store.pantry} == {"Riz", "Pain"}
     assert _click(b, f"m:{other}", without := bot_module.without_button(markup, f"m:{mid}")).edits[-1] == ("markup", None)
@@ -688,7 +688,7 @@ def test_eat_choice_sends_the_recipe_updates_stock_and_drops_other_dishes(tmp_pa
 
     q = _click(b, f"m:{pasta}", markup)
     assert q.edits[-1] == ("markup", None)                                    # les autres plats tombent
-    assert "Pâtes au thon" in b.sent[-1][0] and "1. Cuire les pâtes" in b.sent[-1][0] and "−Thon" in b.sent[-1][0]
+    assert "Pâtes au thon" in b.sent[-1][0] and "1. Cuire les pâtes" in b.sent[-1][0] and "Stock" not in b.sent[-1][0]
     assert {p["name"]: p["qty"] for p in store.pantry} == {"Pâtes": "350 g"}
     assert [m["kcal"] for m in store.meals_since(datetime.date(2020, 1, 1))] == [700]
     assert _click(b, f"m:{omelette}").answers == ["Déjà noté."]
@@ -781,7 +781,7 @@ def test_daily_pantry_check_asks_then_expires(tmp_path, monkeypatch):
     left = q.edits[-1][1]
     assert _buttons(left) == [("✅ Brocoli", f"k:y:{ids['Brocoli']}"), ("🗑️ Fini", f"k:n:{ids['Brocoli']}")]
     q = _click(b, f"k:n:{ids['Brocoli']}", left)                             # fini : retiré, message clos
-    assert "Brocoli" not in {p["name"] for p in store.pantry} and q.edits[-1] == ("🥫 Stock vérifié ✅", None)
+    assert "Brocoli" not in {p["name"] for p in store.pantry} and q.edits[-1] == ("Merci 🙏", None)
     assert _click(b, f"k:n:{ids['Brocoli']}").answers == ["Déjà retiré du stock."]
 
     # Sans réponse 3 jours après la question : retiré automatiquement
@@ -829,7 +829,7 @@ def test_log_meal_tool_logs_updates_stock_and_reports(tmp_path, monkeypatch):
     assert out["logged"]["time"] == "12:45" and out["logged"]["protein_g"] == 42 and out["logged"]["carbs_g"] == 85
     assert {p["name"]: p["qty"] for p in store.pantry} == {"Curry de poulet": "3 boîtes", "Pommes": "5"}
     report = tools.build_report(ledger, False)
-    assert "🍽️ Repas noté : 12:45 Curry de poulet" in report and "🥫 Stock : Curry de poulet (3 boîtes), Pommes (5)" in report
+    assert report == ""
     with pytest.raises(ValueError):
         tools.tool_log_meal({"description": "Dîner", "time": "2099-01-01T20:00:00"}, ledger)
     store.log_meal("Porridge banane", datetime.datetime(2026, 11, 11, 7, 30, tzinfo=tools.cs.TZ), kcal=450, protein_g=15)
@@ -850,7 +850,7 @@ def test_eaten_button_logs_the_meal_and_cooked_button_stocks_boxes(tmp_path, mon
     (meal,) = store.meals_since(datetime.date(2020, 1, 1))
     assert meal["text"] == "Bowl saumon" and meal["kcal"] == 650 and meal["source"] == "bouton"
     _click(b, f"m:{cooked}")
-    assert "cuisiné" in b.sent[-1][0] and "+Curry de poulet (4 boîtes)" in b.sent[-1][0]
+    assert b.sent[-1][0].strip() == "Top, 4 boîtes de côté pour les prochains jours 🙌"
     assert {p["name"]: p["qty"] for p in store.pantry} == {"Riz": "600 g", "Curry de poulet": "4 boîtes"}
     assert len(store.meals_since(datetime.date(2020, 1, 1))) == 1                # cuisiné ≠ mangé
 
@@ -885,12 +885,12 @@ def test_meal_question_only_without_any_trace_and_once(tmp_path, monkeypatch):
     _click(b, "q:s:2026-11-11:1")                                            # sauté : noté à la fin de la plage
     skipped = store.meals_since(datetime.date(2026, 11, 11))[-1]
     assert (skipped["time"], skipped["text"], skipped["kcal"]) == ("14:30", "rien (déjeuner sauté)", 0)
-    assert "déjeuner sauté" in b.sent[-1][0]
+    assert "Ça arrive" in b.sent[-1][0]
     _at(monkeypatch, 21, 30)                                                 # le « sauté » n'efface pas le dîner
     asyncio.run(b.check_meal(2))
     assert "Ce soir" in b.sent[-1][0]
     _click(b, "q:x:2026-11-11:2")                                            # « Passer » des anciens messages
-    assert store.meal_check("2026-11-11 dîner") == "skipped" and "on passe" in b.sent[-1][0]
+    assert store.meal_check("2026-11-11 dîner") == "skipped" and b.sent[-1][0].strip() == "Ok 👌"
 
 
 # --- Boîtes (tups) -------------------------------------------------------------------
@@ -903,7 +903,7 @@ def test_boxes_are_counted_from_cooked_dishes_and_shrink_when_eaten(tmp_path, mo
     assert coaching.boxes_context(store.pantry, 3) == "0/3 occupées → 3 libre(s)"
     cooked = store.add_proposal("Curry de poulet", kind="meal", uses=[{"name": "Poulet"}], makes="2 boîtes", macros={})
     _click(b, f"m:{cooked}")
-    assert "📦 Boîtes : 2/3 occupées (Curry de poulet ×2) → 1 libre(s)" in b.sent[-1][0]
+    assert coaching.boxes_context(store.pantry, 3) == "2/3 occupées (Curry de poulet ×2) → 1 libre(s)"
     tools.tool_log_meal({"description": "Curry (1 boîte)", "uses": [{"name": "Curry de poulet", "qty_left": "1 boîte"}]},
                         tools.Ledger())
     assert coaching.boxes_context(store.pantry, 3) == "1/3 occupées (Curry de poulet ×1) → 2 libre(s)"
@@ -987,7 +987,7 @@ def test_debrief_that_hangs_falls_back_to_raw_stats(tmp_path, monkeypatch):
     monkeypatch.setattr(bot_module.agent, "ask", hang)
     monkeypatch.setattr(bot_module, "DEBRIEF_TIMEOUT_S", 0.01)
     assert asyncio.run(b.check_new_activity()) is True
-    assert "Run 1" in b.sent[0][0] and "indisponible" in b.sent[0][0]
+    assert "Run 1" in b.sent[0][0] and "/debrief" in b.sent[0][0]
     assert store.last_activity_id == 1 and bot_module.ACTIVITY_STATUS["result"] == "débrief envoyé : 1"
 
 
@@ -1026,7 +1026,7 @@ def test_meal_question_guesses_boxes_and_suggested_dishes_one_tap(tmp_path, monk
     assert q.edits == [("markup", None)]                                       # la question est close
     meal = store.meals_since(datetime.date(2026, 11, 11))[-1]
     assert (meal["text"], meal["time"]) == ("Chili", "14:30")                  # à l'heure du repas, pas du clic
-    assert b.sent[-1][0].strip() == "👍 Chili, noté. Il reste : Chili (1 boîte)."
+    assert b.sent[-1][0].strip() == "😋 Il t'en reste 1 boîte."
     assert store.meal_check("2026-11-11 déjeuner") == "answered"
     assert store.proposal(suggested)["status"] == "open"                       # pas mangé : reste candidat
     assert _click(b, chili, markup).answers == ["Déjà noté."]
