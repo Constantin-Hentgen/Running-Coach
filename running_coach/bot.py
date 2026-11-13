@@ -1,6 +1,7 @@
 """Telegram : messages (texte et vocaux), commandes, boutons, briefing matinal, bilan hebdo,
 détection de nouveaux runs avec ressenti, alertes météo."""
 import asyncio
+import contextlib
 import datetime
 import functools
 import logging
@@ -64,16 +65,27 @@ PAIN_FOLLOW_UP = ("😬 Où as-tu mal, depuis quand, et est-ce que ça gêne à 
                   "Réponds-moi (texte ou vocal), j'adapterai la suite.")
 
 
-BUBBLE_GAP_S = 0.6   # petit temps entre deux messages d'une même réponse, comme quelqu'un qui écrit
+BUBBLE_GAP_S = 1.0          # pause minimale avant chaque message suivant d'une réponse
+BUBBLE_CHARS_PER_S = 35     # « vitesse de frappe » : un message plus long se fait attendre un peu plus
+BUBBLE_MAX_GAP_S = 4.0
+MAX_MESSAGES_IN_A_ROW = 4   # au-delà, c'est trop à lire : les messages les plus courts sont regroupés
 
 
-async def send_text(send, text: str, reply_markup=None, as_bubbles: bool = False) -> None:
+def bubble_gap(chunk: str) -> float:
+    return 0.0 if not BUBBLE_GAP_S else min(BUBBLE_MAX_GAP_S, BUBBLE_GAP_S + len(chunk) / BUBBLE_CHARS_PER_S)
+
+
+async def send_text(send, text: str, reply_markup=None, as_bubbles: bool = False, typing=None,
+                    max_bubbles: int = MAX_MESSAGES_IN_A_ROW) -> None:
     """send : coroutine(text=…, **kwargs), texte toujours nommé (send_message a chat_id lié par partial, reply_text non). Markdown d'abord, texte brut si Telegram refuse le balisage.
     Les boutons éventuels sont attachés au dernier morceau."""
-    chunks = bubbles(text) if as_bubbles else split_message(text)
+    chunks = bubbles(text, max_bubbles) if as_bubbles else split_message(text)
     for i, chunk in enumerate(chunks):
-        if as_bubbles and i:
-            await asyncio.sleep(BUBBLE_GAP_S)
+        if as_bubbles and i:   # « écrit… » puis une pause à la mesure du message, comme quelqu'un qui tape
+            if typing is not None:
+                with contextlib.suppress(Exception):
+                    await typing()
+            await asyncio.sleep(bubble_gap(chunk))
         extra = {"reply_markup": reply_markup} if reply_markup is not None and i == len(chunks) - 1 else {}
         try:
             await send(text=chunk, parse_mode=ParseMode.MARKDOWN, **extra)
@@ -242,13 +254,25 @@ class CoachBot:
         body = "\n".join(part for part in (header, reply.text) if part)   # l'en-tête reste sur le premier message
         text = "\n\n".join(part for part in (body, footer) if part)
         if text:   # un message par paragraphe : une conversation, pas un pavé
-            await send_text(self._sender(update), text, markup, as_bubbles=True)
-        if reply.gif:
+            if reply.gif and reply.gif_moment == "ouverture":   # le GIF ouvre l'échange, avant le premier message
+                await self._send_gif(reply.gif, update)
+            await send_text(self._sender(update), text, markup, as_bubbles=True, typing=self._typing(update),
+                            max_bubbles=MAX_MESSAGES_IN_A_ROW - len(reply.proposals))   # propositions comprises
+        if reply.gif and (reply.gif_moment != "ouverture" or not text):   # clôture : après le dernier message
             await self._send_gif(reply.gif, update)
         for pid, summary in reply.proposals:
             await send_text(self._sender(update), proposal_bubble(summary), proposal_markup(pid))
         if reply.shopping_list is not None and (lst := store.shopping_list) and lst["id"] == reply.shopping_list:
             await send_text(self._sender(update), shopping_text(lst), shopping_markup(lst))
+
+    def _typing(self, update: Update | None = None):
+        """Coroutine qui affiche « écrit… » dans le chat (le temps de la pause entre deux messages)."""
+        async def typing() -> None:
+            if update is not None and update.effective_chat is not None:
+                await update.effective_chat.send_action(ChatAction.TYPING)
+            else:
+                await self.app.bot.send_chat_action(chat_id=self.chat_id, action=ChatAction.TYPING)
+        return typing
 
     async def _send_gif(self, url: str, update: Update | None = None) -> None:
         """Le GIF choisi par le coach, juste après son message ; un échec ne bloque jamais la réponse."""

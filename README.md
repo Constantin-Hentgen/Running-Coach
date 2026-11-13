@@ -174,7 +174,7 @@ The `RAIN_ALERT_*` variables keep their historical names but drive all weather a
 | `COACH_TZ` | `Europe/Paris` | Time zone |
 | `BRIEFING_TIME` | `08:00` | Briefing time; `off` = disabled |
 | `WEEKLY_REVIEW_TIME` | `sun 19:00` | Weekly review day (`mon`…`sun`) and time; `off` = disabled (`/review` still works) |
-| `GIPHY_API_KEY` | *(empty)* | Free GIPHY API key ([developers.giphy.com](https://developers.giphy.com)). With it, Bob now and then adds a funny GIF or meme after his message: at most one per chat session (a session ends after 90 min of silence), only when it illustrates what he says, never on a serious topic. Empty = no GIFs |
+| `GIPHY_API_KEY` | *(empty)* | Free GIPHY API key ([developers.giphy.com](https://developers.giphy.com)). With it, Bob now and then adds a funny GIF or meme, only to open a conversation (before his first message of a session) or to close one (after his last): at most one per chat session (a session ends after 90 min of silence), only when it illustrates what he says, never on a serious topic. Empty = no GIFs |
 | `EAT_SUGGEST_TIMES` | `07:00,11:30,18:30` | When to suggest dishes on its own, like `/eat`, just before each meal. Skipped when the coach knows the meal is eaten elsewhere (lunch on office days, from its memory and the calendar), when `/eat` was just asked, or when the meal is already logged; `off` = never |
 | `MEAL_CHECK_TIMES` | `10:30,14:30,21:30` | When to ask « Qu'as-tu mangé ? » (about an hour after each meal), only if no meal was logged since the previous question (5 h at most); `off` = never |
 | `MEAL_BOXES` | `3` | How many meal-prep boxes (tups) you own: the coach plans batch cooking to fill the free ones, never more |
@@ -258,7 +258,7 @@ To correct the memory: *« oublie le #3 »* (forget #3), or simply say what chan
   ```
 - **Debrief** within `ACTIVITY_POLL_MINUTES` minutes (default 1) of a new run appearing in Dreeve. Each check is a single Dreeve API call; the model only runs when there is a new run. Several runs imported at once are covered together. The debrief comes as 2 to 4 very short messages, like a chat: how the run went vs what was planned (laps/splits from Dreeve), the notable point vs your history (only if there is one), and whether the coming sessions still fit, with any change only *proposed* (buttons).
 
-  **Short messages everywhere**: every coach reply is sent as several small Telegram messages, one per paragraph (1–3 lines, one idea each), without headings or recaps. A reply that is still too long is rewritten once, shorter.
+  **Short messages everywhere**: every coach reply is sent as several small Telegram messages, one per paragraph (1–2 lines, one idea each), without headings or recaps, never more than 4 in a row (proposals included; the shortest ones are merged beyond that). Each next message comes after a short « typing… » pause that grows with its length. A reply that is still too long is rewritten once, shorter.
 
   In debrief mode the coach has **no** calendar write access: use ✅ under a proposal, or reply « ok, fais-le » (ok, do it).
 

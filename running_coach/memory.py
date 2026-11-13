@@ -598,13 +598,19 @@ class Store:
     # --- session d'échange (un GIF au plus par session) ------------------------------------
 
     def touch_interaction(self, now: datetime.datetime) -> None:
-        """Un échange avec le coach : une nouvelle session commence après INTERACTION_GAP_MIN minutes de silence."""
+        """Un échange avec le coach : une nouvelle session commence après INTERACTION_GAP_MIN minutes de silence
+        (le premier message d'une session l'« ouvre »)."""
         with self._lock:
             s = self.state["interaction"]
             if not s["last"] or now - datetime.datetime.fromisoformat(s["last"]) > datetime.timedelta(minutes=INTERACTION_GAP_MIN):
                 s["start"] = now.isoformat()
             s["last"] = now.isoformat()
             self._save()
+
+    def session_opening(self) -> bool:
+        """Le message en cours est le premier de la session."""
+        s = self.state["interaction"]
+        return bool(s["start"]) and s["start"] == s["last"]
 
     def gif_available(self) -> bool:
         s = self.state["interaction"]

@@ -1121,7 +1121,7 @@ def test_bubbles_split_on_blank_lines_and_keep_lists_together():
     assert bubbles("") == []
 
 
-def test_gif_once_per_session_and_sent_after_the_message(tmp_path, monkeypatch):
+def test_gif_only_to_open_or_close_once_per_session(tmp_path, monkeypatch):
     from running_coach import tools
     b, store = _bot(tmp_path, monkeypatch)
     monkeypatch.setattr(tools, "store", store)
@@ -1141,21 +1141,67 @@ def test_gif_once_per_session_and_sent_after_the_message(tmp_path, monkeypatch):
     monkeypatch.setattr(tools.requests, "get", fake_get)
     t0 = datetime.datetime(2026, 11, 13, 18, 0, tzinfo=bot_module.TZ)
     store.touch_interaction(t0)
+    assert store.session_opening()
+    store.touch_interaction(t0 + datetime.timedelta(minutes=5))             # mid-conversation
+    assert not store.session_opening()
+    assert not tools.tool_send_gif({"query": "hello", "moment": "ouverture"}, tools.Ledger())["ok"] and not calls
     ledger = tools.Ledger()
-    assert tools.tool_send_gif({"query": "proud high five"}, ledger)["ok"]
-    assert ledger.actions[0].detail == "https://media.giphy.com/x.gif" and calls == ["proud high five"]
-    store.touch_interaction(t0 + datetime.timedelta(minutes=30))           # same session: no second GIF
-    assert not tools.tool_send_gif({"query": "rain"}, tools.Ledger())["ok"] and len(calls) == 1
-    store.touch_interaction(t0 + datetime.timedelta(hours=3))              # new session after a long silence
-    assert store.gif_available()
+    assert tools.tool_send_gif({"query": "see you", "moment": "clôture"}, ledger)["ok"]   # closing is fine
+    assert ledger.actions[0].label == "clôture : see you" and calls == ["see you"]
+    assert not tools.tool_send_gif({"query": "bye", "moment": "clôture"}, tools.Ledger())["ok"]   # one per session
+    store.touch_interaction(t0 + datetime.timedelta(hours=3))               # new session opens
+    assert store.session_opening() and store.gif_available()
+    assert tools.tool_send_gif({"query": "good morning", "moment": "ouverture"}, tools.Ledger())["ok"]
 
-    sent_gifs = []
+
+def test_opening_gif_goes_first_closing_gif_last(tmp_path, monkeypatch):
+    b, store = _bot(tmp_path, monkeypatch)
+    order = []
 
     async def send_animation(chat_id, animation):
-        sent_gifs.append((chat_id, animation, len(b.sent)))
+        order.append(f"gif {animation}")
+
+    async def fake_send(text, **kwargs):
+        order.append(text.strip())
 
     b.app = NS(bot=NS(send_animation=send_animation))
-    pid = store.add_proposal("x", summary="On décale jeudi ?")
-    asyncio.run(b._deliver(agent.AgentReply("Belle séance !", [(pid, "On décale jeudi ?")], gif="https://g/x.gif")))
-    assert sent_gifs == [("42", "https://g/x.gif", 1)]                     # after the text, before the proposal
-    assert b.sent[-1][0].startswith("💡")
+    b._sender = lambda update=None: fake_send
+    asyncio.run(b._deliver(agent.AgentReply("Salut !\n\nGrosse journée ?", gif="o.gif", gif_moment="ouverture")))
+    assert order == ["gif o.gif", "Salut !", "Grosse journée ?"]
+    order.clear()
+    asyncio.run(b._deliver(agent.AgentReply("Bonne soirée !", gif="c.gif", gif_moment="clôture")))
+    assert order == ["Bonne soirée !", "gif c.gif"]
+
+
+def test_pause_before_each_next_message_grows_with_its_length(monkeypatch):
+    monkeypatch.setattr(bot_module, "BUBBLE_GAP_S", 1.0)
+    assert bot_module.bubble_gap("ok") < bot_module.bubble_gap("x" * 80) <= bot_module.BUBBLE_MAX_GAP_S
+    assert bot_module.bubble_gap("x" * 1000) == bot_module.BUBBLE_MAX_GAP_S
+    events = []
+
+    async def fake_sleep(s):
+        events.append(f"sleep {s:.1f}")
+
+    async def send(text, **kwargs):
+        events.append(text.strip())
+
+    async def typing():
+        events.append("typing")
+
+    monkeypatch.setattr(bot_module.asyncio, "sleep", fake_sleep)
+    asyncio.run(bot_module.send_text(send, "A\n\nBB", as_bubbles=True, typing=typing))
+    assert events == ["A", "typing", f"sleep {bot_module.bubble_gap('BB\n'):.1f}", "BB"]
+
+
+
+def test_never_more_than_four_messages_in_a_row(tmp_path, monkeypatch):
+    from running_coach.formatting import bubbles
+    six = "\n\n".join(["Un.", "Deux.", "Trois trois trois trois.", "Quatre.", "Cinq cinq cinq cinq cinq.", "Six."])
+    merged = [m.strip() for m in bubbles(six, 4)]
+    assert len(merged) == 4 and "\n\n".join(merged) == six                   # rien de perdu, l'ordre gardé
+    assert merged[0] == "Un.\n\nDeux."                                          # les plus courts regroupés
+
+    b, store = _bot(tmp_path, monkeypatch)
+    pids = [(store.add_proposal(t, summary=t), t) for t in ("On décale jeudi ?", "On retire dimanche ?")]
+    asyncio.run(b._deliver(agent.AgentReply(six, pids)))
+    assert len(b.sent) == 4 and [t for t, _ in b.sent[2:]] == ["💡 On décale jeudi ?\n", "💡 On retire dimanche ?\n"]

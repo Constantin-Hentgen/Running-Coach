@@ -598,18 +598,21 @@ LOG_MEAL_TOOL = {
 GIF_TOOL = {
     "name": "send_gif",
     "description": (
-        "Envoie un GIF ou un mème drôle juste après ton message, comme le ferait un pote. Rarement : un seul par session au "
-        "plus, et seulement quand il illustre exactement ce que tu dis (une belle séance, la pluie un jour de sortie "
-        "longue, un repas sauté…) ; jamais au hasard, jamais sur un sujet sérieux (douleur, blessure, coup dur). "
-        "Ne le décris pas dans ton message."
+        "Envoie un GIF ou un mème drôle, comme le ferait un pote, pour OUVRIR un échange (ton premier message d'une "
+        "session : il part avant ton texte) ou le CLÔTURER (l'échange se termine : merci, à plus, c'est réglé… : il part "
+        "après ton texte). Jamais au milieu d'une discussion. Rarement : un seul par session au plus, et seulement quand "
+        "il illustre exactement ce que tu dis (une belle séance, la pluie un jour de sortie longue…) ; jamais au hasard, "
+        "jamais sur un sujet sérieux (douleur, blessure, coup dur). Ne le décris pas dans ton message."
     ),
     "input_schema": {
         "type": "object",
         "properties": {
             "query": {"type": "string", "description": "2 à 4 mots-clés EN ANGLAIS décrivant la réaction ou la scène, "
                       "ex: « proud high five », « running in the rain », « hungry waiting ». Jamais de nom ni d'info personnelle."},
+            "moment": {"type": "string", "enum": ["ouverture", "clôture"],
+                       "description": "ouverture = ton premier message de la session ; clôture = l'échange se termine"},
         },
-        "required": ["query"],
+        "required": ["query", "moment"],
     },
 }
 
@@ -619,6 +622,11 @@ GIPHY_SEARCH_URL = "https://api.giphy.com/v1/gifs/search"
 def tool_send_gif(args: dict, ledger: Ledger) -> dict:
     if not store.gif_available():
         return {"ok": False, "error": "un GIF a déjà été envoyé dans cette session : pas d'autre"}
+    moment = args.get("moment")
+    if moment not in ("ouverture", "clôture"):
+        raise ValueError("moment : « ouverture » ou « clôture »")
+    if moment == "ouverture" and not store.session_opening():
+        return {"ok": False, "error": "l'échange est déjà en cours : un GIF seulement pour ouvrir (premier message) ou clôturer"}
     query = " ".join(str(args.get("query") or "").split())[:50]
     if not query:
         raise ValueError("query vide")
@@ -630,7 +638,7 @@ def tool_send_gif(args: dict, ledger: Ledger) -> dict:
         url = (images.get("downsized_medium") or {}).get("url") or (images.get("original") or {}).get("url")
         if url:
             store.mark_gif(cs.now_utc())
-            ledger.record("gif", query, True, detail=url)
+            ledger.record("gif", f"{moment} : {query}", True, detail=url)
             return {"ok": True, "note": "Le GIF part juste après ton message. Ne le décris pas."}
     return {"ok": False, "error": f"aucun GIF trouvé pour « {query} » : continue sans"}
 
