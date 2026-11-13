@@ -110,7 +110,7 @@ STYLE DE CONVERSATION (une discussion par messages, comme entre deux personnes, 
 - Va droit au but : la réponse d'abord, sans préambule (« Voici ce que je te propose… »), sans reformuler sa demande, sans répéter ce que tu as déjà dit plus haut dans la conversation.
 - Un plan (plusieurs séances) : une ligne par séance, rien de plus.
 - Une seule question à la fois, à la fin, et seulement si la réponse change vraiment ce que tu vas faire.
-- Jamais d'UID, d'identifiant technique ni de nom d'outil dans tes réponses.
+- Jamais d'UID, d'identifiant technique ni de nom d'outil dans tes réponses. N'écris jamais un appel d'outil en texte (« [propose_meal: …] ») : ça n'exécute rien, appelle l'outil.
 - Ne recopie jamais le compte-rendu système ni les « 🧠 Noté » : le système les ajoute lui-même sous ta réponse. Les notes « [Note système…] » de l'historique sont pour toi, pas à recopier.
 - Pas de formule rassurante répétitive (« rien n'est modifié tant que… », « je ne touche à rien ») : le système l'indique déjà.
 
@@ -163,7 +163,8 @@ MAX_BUBBLE_CHARS = 280
 TOO_LONG_NUDGE = (
     "[Système] Ta réponse est trop longue pour une conversation par messages. Réécris-la plus courte : 1 ou 2 messages "
     "de 1 ou 2 lignes (séparés par une ligne vide), l'essentiel seulement, sans titres ni récapitulatif. "
-    "N'appelle aucun outil et ne refais aucune action : réécris seulement ton message."
+    "N'appelle aucun outil et ne refais aucune action (celles déjà faites restent valides, leurs boutons sont affichés) : "
+    "réécris seulement ton message, sans y écrire d'appel d'outil."
 )
 
 
@@ -185,8 +186,23 @@ ECHOED_REPORT_LINE = re.compile(
     r"🧠 Noté\s*:|🗑️ Oublié\s*:|🎯 Objectif enregistré\s*:|🏁 Objectif retiré\s*:|💡 Propositions?\b)")
 
 
+# Le modèle écrit parfois un appel d'outil en texte (« [propose_meal: Tortilla] ») au lieu de l'appeler : ça n'exécute
+# rien (pas de bouton) et ne doit jamais arriver sur Telegram.
+PSEUDO_TOOL_LINE = re.compile(r"^\s*\[\s*([a-z]+(?:_[a-z]+)+)\s*(?::[^\]]*)?\]\s*$")
+PSEUDO_TOOL_NUDGE = (
+    "[Système] Ta réponse contient des appels d'outils écrits en texte ({names}) : ça n'exécute rien et l'athlète ne "
+    "voit aucun bouton. Appelle réellement ces outils maintenant (sauf ceux déjà appelés dans ce tour), puis redonne ta "
+    "réponse sans ces lignes."
+)
+
+
+def pseudo_tool_calls(text: str) -> list[str]:
+    return [m.group(1) for line in (text or "").splitlines() if (m := PSEUDO_TOOL_LINE.match(line))]
+
+
 def strip_echoed_report(text: str) -> str:
-    lines = [line for line in (text or "").splitlines() if not ECHOED_REPORT_LINE.match(line)]
+    lines = [line for line in (text or "").splitlines()
+             if not ECHOED_REPORT_LINE.match(line) and not PSEUDO_TOOL_LINE.match(line)]
     return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
 
 
@@ -372,6 +388,12 @@ async def ask(user_prompt: str, chat_id: str = "default", allow_writes: bool = T
                              {"role": "user", "content": DODGE_NUDGE}]
                 retry, truncated = await _run_loop(messages, tools, ledger, model)
                 reply = retry or reply
+            if not truncated and (fake := pseudo_tool_calls(reply)):   # outils « appelés » en texte : on relance une fois
+                logger.warning(f"Appels d'outils écrits en texte : {fake} — relance")
+                messages += [{"role": "assistant", "content": reply},
+                             {"role": "user", "content": PSEUDO_TOOL_NUDGE.format(names=", ".join(sorted(set(fake))))}]
+                retry, truncated = await _run_loop(messages, tools, ledger, model)
+                reply = retry or reply
             if not truncated and too_long(reply):   # pavé : réécrit une fois en messages courts
                 logger.warning(f"Réponse trop longue ({len(reply)} caractères) : réécriture")
                 messages += [{"role": "assistant", "content": reply},
@@ -406,7 +428,8 @@ async def ask(user_prompt: str, chat_id: str = "default", allow_writes: bool = T
         store.set_history(chat_id, history[-settings.history_messages:])
 
         logger.info(f"Agent terminé ({model}) : {ledger.ok_count}/{len(ledger)} action(s) réussie(s), "
-                    f"{len(proposals)} proposition(s), truncated={truncated}, error={error}")
+                    f"{len(proposals)} proposition(s), {sum(a.kind == 'meal' for a in ledger.actions)} plat(s), "
+                    f"truncated={truncated}, error={error}")
         shopping = next((int(a.detail) for a in reversed(ledger.actions) if a.kind == "shopping" and a.ok), None)
         meals = [(int(a.detail), a.label) for a in ledger.actions if a.kind == "meal"]
         gif = next((a for a in ledger.actions if a.kind == "gif" and a.ok), None)

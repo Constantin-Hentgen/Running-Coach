@@ -298,3 +298,31 @@ def test_too_long_reply_is_rewritten_once(tmp_path, monkeypatch):
     assert {"role": "user", "content": agent.TOO_LONG_NUDGE} in fake.calls[1]["messages"]
     assert not agent.too_long("Court.\n\n" + "- séance\n" * 20)
     assert agent.too_long("x" * 450)
+
+
+def test_tool_calls_written_as_text_are_retried_and_never_shown(tmp_path, monkeypatch):
+    store = Store(tmp_path / "state.json")
+    monkeypatch.setattr(agent, "store", store)
+    monkeypatch.setattr(tools, "store", store)
+
+    async def fake_context():
+        return "CONTEXTE"
+
+    async def no_tools():
+        return []
+
+    monkeypatch.setattr(agent, "_gather_context", fake_context)
+    monkeypatch.setattr(dreeve_mcp, "load_tools", no_tools)
+    fake_text = "🍽️ Tortilla · ⏱️ 25 min\n\n[propose_meal: Tortilla pommes de terre]"
+    first = NS(stop_reason="end_turn", usage=_usage(), content=[NS(type="text", text=fake_text)])
+    call = NS(stop_reason="tool_use", usage=_usage(), content=[NS(type="tool_use", id="m1", name="propose_meal", input={
+        "title": "Tortilla pommes de terre", "recipe": "1. Cuire", "uses": [{"name": "Œufs"}]})])
+    final = NS(stop_reason="end_turn", usage=_usage(), content=[NS(type="text", text="🍽️ Tortilla · ⏱️ 25 min\n[propose_meal]")])
+    fake = FakeMessages([first, call, final])
+    monkeypatch.setattr(agent, "_client", NS(messages=fake))
+    reply = asyncio.run(agent.ask("/eat", chat_id="1", allow_writes=False))
+    assert [t for _, t in reply.meals] == ["Tortilla pommes de terre"]               # vraiment appelé
+    nudge = agent.PSEUDO_TOOL_NUDGE.format(names="propose_meal")
+    assert {"role": "user", "content": nudge} in fake.calls[1]["messages"]           # relance explicite
+    assert reply.text == "🍽️ Tortilla · ⏱️ 25 min"                                   # jamais affiché
+    assert agent.pseudo_tool_calls("[send_gif: high five]\n[Note système, x]\n[propose_meal]") == ["send_gif", "propose_meal"]
