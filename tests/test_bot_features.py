@@ -876,8 +876,8 @@ def test_meal_question_only_without_any_trace_and_once(tmp_path, monkeypatch):
     _at(monkeypatch, 14, 30)
     asyncio.run(b.check_meal(1))
     text, markup = b.sent[-1]
-    assert "Qu'as-tu mangé au déjeuner ?" in text and "entraînement" in text
-    assert _buttons(markup) == [("🙅 Sauté", "q:s:2026-11-11:1"), ("⏭️ Passer", "q:x:2026-11-11:1")]
+    assert "Ce midi, tu as mangé quoi ?" in text and "texte ou en vocal" in text   # rien à deviner
+    assert _buttons(markup) == [("🙅 Sauté", "q:s:2026-11-11:1")]
     asyncio.run(b.check_meal(1))                                             # déjà posée : pas deux fois
     assert len(b.sent) == 1
 
@@ -887,8 +887,8 @@ def test_meal_question_only_without_any_trace_and_once(tmp_path, monkeypatch):
     assert "déjeuner sauté" in b.sent[-1][0]
     _at(monkeypatch, 21, 30)                                                 # le « sauté » n'efface pas le dîner
     asyncio.run(b.check_meal(2))
-    assert "au dîner" in b.sent[-1][0]
-    _click(b, "q:x:2026-11-11:2")
+    assert "Ce soir" in b.sent[-1][0]
+    _click(b, "q:x:2026-11-11:2")                                            # « Passer » des anciens messages
     assert store.meal_check("2026-11-11 dîner") == "skipped" and "on passe" in b.sent[-1][0]
 
 
@@ -1002,3 +1002,60 @@ def test_proactive_messages_reach_send_message_with_bound_chat_id(tmp_path, monk
     b.chat_id, b.app = "42", NS(bot=NS(send_message=send_message))
     asyncio.run(b._push("⚡ *Nouveau run détecté !*"))
     assert sent == [("42", "⚡ *Nouveau run détecté !*\n")] or sent == [("42", "⚡ *Nouveau run détecté !*")]
+
+
+
+def test_meal_question_guesses_boxes_and_suggested_dishes_one_tap(tmp_path, monkeypatch):
+    import dataclasses
+    b, store = _bot(tmp_path, monkeypatch)
+    monkeypatch.setattr(bot_module, "settings",
+                        dataclasses.replace(bot_module.settings, meal_check_times=[(10, 30), (14, 30), (21, 30)]))
+    store.update_pantry(add=[{"name": "Chili", "qty": "2 boîtes", "boxes": True}, {"name": "Thon", "qty": "2 boîtes"}])
+    suggested = store.add_proposal("Pâtes au thon", kind="meal", uses=[{"name": "Thon", "qty_left": "1 boîte"}],
+                                   macros={"kcal": 650})
+    _at(monkeypatch, 14, 30)
+    asyncio.run(b.check_meal(1))
+    text, markup = b.sent[-1]
+    assert text.startswith("🍽️ *Ce midi, tu as mangé quoi ?*") and "Touche le plat" in text
+    labels = [label for label, _ in _buttons(markup)]
+    assert labels == ["🍱 Chili", "🍽️ Pâtes au thon", "🙅 Sauté"]   # boîte d'abord, puis le plat proposé
+
+    chili = next(d for label, d in _buttons(markup) if "Chili" in label)
+    q = _click(b, chili, markup)
+    assert q.edits == [("markup", None)]                                       # la question est close
+    meal = store.meals_since(datetime.date(2026, 11, 11))[-1]
+    assert (meal["text"], meal["time"]) == ("Chili", "14:30")                  # à l'heure du repas, pas du clic
+    assert b.sent[-1][0].strip() == "👍 Chili, noté. Il reste : Chili (1 boîte)."
+    assert store.meal_check("2026-11-11 déjeuner") == "answered"
+    assert store.proposal(suggested)["status"] == "open"                       # pas mangé : reste candidat
+    assert _click(b, chili, markup).answers == ["Déjà noté."]
+
+    _at(monkeypatch, 21, 30)                                                   # dîner : le plat proposé, une boîte de moins
+    asyncio.run(b.check_meal(2))
+    _, markup = b.sent[-1]
+    pasta = next(d for label, d in _buttons(markup) if "Pâtes" in label)
+    _click(b, pasta, markup)
+    assert store.proposal(suggested)["status"] == "applied"                    # l'original ne sera plus proposé
+    assert {p["name"]: p["qty"] for p in store.pantry}["Thon"] == "1 boîte"
+    assert store.meals_since(datetime.date(2026, 11, 11))[-1]["kcal"] == 650
+
+
+def test_last_box_is_said_and_skipping_closes_the_guesses(tmp_path, monkeypatch):
+    import dataclasses
+    b, store = _bot(tmp_path, monkeypatch)
+    monkeypatch.setattr(bot_module, "settings",
+                        dataclasses.replace(bot_module.settings, meal_check_times=[(14, 30), (21, 30)]))
+    store.update_pantry(add=[{"name": "Curry", "qty": "1 boîte", "boxes": True}])
+    _at(monkeypatch, 14, 30)
+    asyncio.run(b.check_meal(0))
+    _, markup = b.sent[-1]
+    _click(b, _buttons(markup)[0][1], markup)
+    assert "dernière boîte" in b.sent[-1][0] and not store.pantry
+
+    store.update_pantry(add=[{"name": "Dahl", "qty": "2 boîtes", "boxes": True}])
+    _at(monkeypatch, 21, 30)
+    asyncio.run(b.check_meal(1))
+    _, markup = b.sent[-1]
+    dahl = _buttons(markup)[0][1]
+    _click(b, "q:s:2026-11-11:1", markup)
+    assert _click(b, dahl, markup).answers == ["Déjà noté."]                  # sauté : le plat deviné ne compte plus

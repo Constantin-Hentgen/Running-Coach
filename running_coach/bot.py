@@ -126,6 +126,42 @@ def meal_hint(meals: list[tuple[int, str]]) -> str:
     return CHOOSE_HINT if any(has_recipe(mid) for mid, _ in meals) else MEAL_HINT
 
 
+MEAL_GUESS_HOURS = 36   # un plat proposé il y a plus longtemps n'est plus un candidat crédible
+MAX_MEAL_GUESSES = 3
+MEAL_SLOT_WHEN = {"petit-déjeuner": "Ce matin", "déjeuner": "Ce midi", "collation": "Cet après-midi", "dîner": "Ce soir"}
+
+
+def meal_guesses(now: datetime.datetime) -> list[dict]:
+    """Ce que l'athlète a probablement mangé : ses boîtes prêtes (la plus ancienne d'abord), puis les plats que le coach
+    lui a proposés récemment (le plus récent d'abord). [{text, uses, macros, box, source}]"""
+    guesses = []
+    for p in sorted((p for p in store.pantry if p.get("boxes")), key=lambda p: p.get("added") or ""):
+        n = coaching.box_count(p.get("qty"))
+        use = {"name": p["name"], **({"qty_left": f"{n - 1} boîte{'s' if n > 2 else ''}"} if n > 1 else {})}
+        guesses.append({"text": p["name"], "uses": [use], "macros": {}, "box": True, "source": None})
+    cutoff = now - datetime.timedelta(hours=MEAL_GUESS_HOURS)
+    recent = [(pid, item) for pid, item in store.state["proposals"].items()
+              if item.get("kind") == "meal" and item["status"] == "open" and not item.get("makes")
+              and not item.get("check") and datetime.datetime.fromisoformat(item["created"]) > cutoff]
+    for pid, item in sorted(recent, key=lambda x: x[1]["created"], reverse=True):
+        guesses.append({"text": item["text"], "uses": item.get("uses") or [], "macros": item.get("macros") or {},
+                        "box": False, "source": pid})
+    seen, out = set(), []
+    for g in guesses:
+        if g["text"].casefold() not in seen:
+            seen.add(g["text"].casefold())
+            out.append(g)
+    return out[:MAX_MEAL_GUESSES]
+
+
+def close_meal_guesses(markup: InlineKeyboardMarkup | None) -> None:
+    """La question « tu as mangé quoi ? » a sa réponse : ses autres plats candidats ne valent plus rien."""
+    for row in (markup.inline_keyboard if markup else ()):
+        for btn in row:
+            if (btn.callback_data or "").startswith("m:"):
+                store.close_proposal(btn.callback_data[2:], "ignored")
+
+
 def open_meals(ids: list[int]) -> list[tuple[int, str]]:
     """Plats encore à confirmer parmi `ids` (déjà touchés ou expirés : plus de bouton)."""
     return [(mid, item["text"]) for mid in ids
@@ -511,6 +547,9 @@ class CoachBot:
             return
         r = store.update_pantry(remove=item.get("uses") or [])
         await query.answer()
+        if item.get("check"):   # réponse à « tu as mangé quoi ? » : une ligne, et la question est close
+            await self._on_meal_guess(query, item, r)
+            return
         markup = without_button(query.message.reply_markup, f"m:{mid}")
         if item.get("recipe"):   # /eat : un seul plat choisi, les autres propositions tombent
             for row in (markup.inline_keyboard if markup else ()):
@@ -538,12 +577,29 @@ class CoachBot:
         await self._push(text)
         await agent.add_to_history(self.chat_id, f"[L'athlète a confirmé avoir mangé / cuisiné : {item['text']}]", md_unescape(text))
 
+    async def _on_meal_guess(self, query, item: dict, r: dict) -> None:
+        store.set_meal_check(item["check"], "answered")
+        if item.get("source"):   # le plat proposé à l'origine est mangé : plus un candidat pour le prochain repas
+            store.close_proposal(item["source"], "applied")
+        close_meal_guesses(query.message.reply_markup)
+        macros = item.get("macros") or {}
+        store.log_meal(item["text"], datetime.datetime.fromisoformat(item["at"]), source="bouton", **macros)
+        text = f"👍 {md_escape(item['text'])}, noté."
+        if r["updated"]:
+            text += f" Il reste : {md_escape(', '.join(r['updated']))}."
+        elif any(u.get("name", "").casefold() == item["text"].casefold() for u in item.get("uses") or []) and r["removed"]:
+            text += " C'était la dernière boîte."
+        await query.edit_message_reply_markup(None)
+        await self._push(text)
+        await agent.add_to_history(self.chat_id, f"[L'athlète a répondu avoir mangé : {item['text']}]", md_unescape(text))
+
     async def _on_meal_question(self, update: Update, action: str, day: str, index: int) -> None:
         """« Qu'as-tu mangé ? » : Sauté (noté comme repas vide, à la fin de sa plage) ou Passer (on n'en parle plus)."""
         query = update.callback_query
         await query.answer()
         _, end, slot = coaching.meal_window(settings.meal_check_times, index)
         key = f"{day} {slot}"
+        close_meal_guesses(query.message.reply_markup)
         if action == "s":
             at = datetime.datetime.combine(datetime.date.fromisoformat(day), end, tzinfo=TZ)
             store.log_meal(f"rien ({slot} sauté)", at, source="bouton", kcal=0, protein_g=0, carbs_g=0)
@@ -697,12 +753,17 @@ class CoachBot:
         try:
             if store.meal_check(key) or coaching.has_meal_between(store.meals_since(now.date()), now.date(), start, end):
                 return
-            text = (f"🍽️ *Qu'as-tu mangé {coaching.MEAL_SLOT_LABEL[slot]} ?*\n"
-                    "Réponds en texte ou en vocal (« pâtes au thon et une pomme ») : je mets ton stock à jour et je te "
-                    "dis si ça colle avec ton entraînement.")
-            data = f"{now.date().isoformat()}:{index}"
-            markup = InlineKeyboardMarkup([[InlineKeyboardButton("🙅 Sauté", callback_data=f"q:s:{data}"),
-                                            InlineKeyboardButton("⏭️ Passer", callback_data=f"q:x:{data}")]])
+            # on part de ce qu'on sait (boîtes prêtes, plats proposés) : un geste suffit dans le cas courant
+            at = datetime.datetime.combine(now.date(), end, tzinfo=TZ).isoformat()
+            rows = []
+            for g in meal_guesses(now):
+                gid = store.add_proposal(g["text"], kind="meal", uses=g["uses"], macros=g["macros"], at=at,
+                                         check=key, source=g["source"])
+                rows.append([InlineKeyboardButton(f"{'🍱' if g['box'] else '🍽️'} {g['text']}"[:60], callback_data=f"m:{gid}")])
+            hint = "Touche le plat, ou dis-moi ce que c'était." if rows else "Dis-le-moi en texte ou en vocal, je m'occupe du stock."
+            text = f"🍽️ *{MEAL_SLOT_WHEN[slot]}, tu as mangé quoi ?*\n{hint}"
+            rows.append([InlineKeyboardButton("🙅 Sauté", callback_data=f"q:s:{now.date().isoformat()}:{index}")])
+            markup = InlineKeyboardMarkup(rows)
             await self._push(text, markup)
             store.set_meal_check(key, "asked")
             await agent.add_to_history(self.chat_id, f"[Question automatique du système : repas ({slot}) non noté]",

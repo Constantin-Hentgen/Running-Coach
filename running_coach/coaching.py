@@ -174,10 +174,6 @@ def meal_window(times: list[tuple[int, int]], index: int) -> tuple[datetime.time
     return datetime.time(start_min // 60, start_min % 60), end, meal_slot(end)
 
 
-MEAL_SLOT_LABEL = {"petit-déjeuner": "au petit-déjeuner", "déjeuner": "au déjeuner", "collation": "en collation",
-                   "dîner": "au dîner"}
-
-
 def has_meal_between(meals: list[dict], day: datetime.date, start: datetime.time, end: datetime.time) -> bool:
     lo, hi, d = f"{start:%H:%M}", f"{end:%H:%M}", day.isoformat()
     return any(m["date"] == d and lo < m["time"] <= hi for m in meals)
