@@ -1401,3 +1401,30 @@ def test_meme_command_sends_a_gif_first_even_mid_session(tmp_path, monkeypatch):
     assert seen["ok"] and "[/meme]" in seen["prompt"]                        # allowed despite the session rule
     assert order == ["gif https://g/legs.gif", "Jambes en bois, mais t'y es allé 😂"]   # meme first, caption after
     assert not tools.tool_send_gif({"query": "x", "moment": "clôture"}, tools.Ledger())["ok"]   # rule back outside /meme
+
+
+def test_chosen_dish_with_boxes_counts_as_eaten_and_meal_question_waits_an_hour(tmp_path, monkeypatch):
+    import dataclasses
+    b, store = _bot(tmp_path, monkeypatch)
+    monkeypatch.setattr(bot_module, "settings",
+                        dataclasses.replace(bot_module.settings, meal_check_times=[(14, 30), (21, 30)]))
+    mid = store.add_proposal("🌮 Tortilla", kind="meal", uses=[], recipe="1. Cuire", makes="1 boîte", macros={"kcal": 700})
+    _click(b, f"m:{mid}")
+    assert "1 boîte de côté" in b.sent[-1][0] and "1. Cuire" in b.sent[-1][0]
+    assert store.meals_since(datetime.date.today() - datetime.timedelta(days=1))[-1]["text"] == "🌮 Tortilla"   # eaten
+    assert coaching.boxes_in_use(store.pantry) == [("🌮 Tortilla", 1)]                                       # + the box
+
+    waits = []
+
+    async def fake_later(index, wait):
+        waits.append((index, round(wait)))
+
+    b._ask_meal_later = fake_later
+    n = len(b.sent)
+
+    async def run():
+        await b.check_meal(1)
+        await asyncio.sleep(0)
+
+    asyncio.run(run())
+    assert len(b.sent) == n and waits and waits[0][0] == 1 and 3500 <= waits[0][1] <= 3600   # postponed ~1 h

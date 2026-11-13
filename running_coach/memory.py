@@ -305,8 +305,15 @@ class Store:
             if not item or item["status"] != "open":
                 return None
             item["status"] = status
+            item["closed"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
             self._save()
             return dict(item)
+
+    def last_dish_chosen_at(self) -> datetime.datetime | None:
+        """Quand l'athlète a choisi pour la dernière fois un plat de /eat (bouton), s'il l'a fait."""
+        times = [datetime.datetime.fromisoformat(p["closed"]) for p in self.state["proposals"].values()
+                 if p.get("kind") == "meal" and p.get("recipe") and p["status"] == "applied" and p.get("closed")]
+        return max(times, default=None)
 
     # --- liste de courses à cocher -----------------------------------------------------
 

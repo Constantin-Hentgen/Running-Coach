@@ -650,16 +650,17 @@ class CoachBot:
                         markup = without_button(markup, btn.callback_data)
         await query.edit_message_reply_markup(markup)
         changes = [f"−{x}" for x in r["removed"]] + r["updated"]
-        if item.get("makes"):   # batch cooking : les boîtes entrent au stock, rien n'est encore mangé
+        if item.get("makes"):   # boîtes pour plus tard : elles entrent au stock
             store.update_pantry(add=[{"name": item["text"], "qty": item["makes"], "keeps_days": 4, "boxes": True}])
             changes.append(f"+{item['text']} ({item['makes']})")
             text = f"Top, {md_escape(item['makes'])} de côté pour les prochains jours 🙌"
-        else:                   # mangé : entre dans le journal alimentaire
+        if item.get("recipe") or not item.get("makes"):   # /eat (choisi = mangé maintenant) ou plat mangé : au journal
             macros = item.get("macros") or {}
             store.log_meal(item["text"], datetime.datetime.now(TZ), source="bouton", **macros)
-            text = "Bon app' 😋"
+            text = "Bon app' 😋" if not item.get("makes") else text
         if item.get("recipe"):   # plat choisi : la recette, simplement
-            text = f"Bon choix 😋 *{md_escape(item['text'])}*, voilà comment faire :\n\n{item['recipe']}"
+            boxes = f" (et {md_escape(item['makes'])} de côté 🙌)" if item.get("makes") else ""
+            text = f"Bon choix 😋 *{md_escape(item['text'])}*{boxes}, voilà comment faire :\n\n{item['recipe']}"
         await self._push(text)
         await agent.add_to_history(self.chat_id, f"[L'athlète a confirmé avoir mangé / cuisiné : {item['text']}]", md_unescape(text))
 
@@ -845,7 +846,24 @@ class CoachBot:
         except Exception:
             logger.exception("Vérification du stock en échec")
 
+    MEAL_QUESTION_DELAY = datetime.timedelta(hours=1)   # le temps de cuisiner et manger le plat choisi
+
     async def check_meal(self, index: int) -> None:
+        """Pas de question pendant l'heure qui suit le choix d'un plat : elle attend la fin de cette heure."""
+        chosen = store.last_dish_chosen_at()
+        wait = (chosen + self.MEAL_QUESTION_DELAY - datetime.datetime.now(datetime.timezone.utc)).total_seconds() if chosen else 0
+        if wait > 0:
+            task = asyncio.create_task(self._ask_meal_later(index, wait))
+            self._background.add(task)
+            task.add_done_callback(self._background.discard)
+            return
+        await self._ask_meal(index)
+
+    async def _ask_meal_later(self, index: int, wait: float) -> None:
+        await asyncio.sleep(wait)
+        await self._ask_meal(index)
+
+    async def _ask_meal(self, index: int) -> None:
         """Après un repas (MEAL_CHECK_TIMES) : sans aucune trace de ce repas (bouton « mangé », repas dit au coach),
         demande ce qui a été mangé. La réponse, libre, passe par le coach : journal, stock, avis nutrition."""
         now = datetime.datetime.now(TZ)
