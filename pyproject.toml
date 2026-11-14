@@ -4,7 +4,7 @@ version = "0.3.0"
 description = "Autonomous Telegram Running Coach Agent"
 license = "MIT"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.110.0",
     "uvicorn>=0.28.0",

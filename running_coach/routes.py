@@ -12,6 +12,7 @@ import io
 import logging
 import math
 import re
+from concurrent.futures import ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from xml.sax.saxutils import escape
 
@@ -27,6 +28,9 @@ USER_AGENT = "running-coach-bot/1.0 (self-hosted personal assistant)"
 ROUTE_FACTOR = 1.25          # une boucle suit les rues : ~25 % plus longue que le triangle à vol d'oiseau
 DISTANCE_TOLERANCE = 0.12    # ±12 % de la distance voulue
 NEVER_DONE_MIN = 0.8         # « jamais faite » : au moins 80 % du parcours hors de mes anciens tracés
+ROUTES_BUDGET_S = 45         # temps total max pour calculer toutes les orientations
+ROUTES_WORKERS = 4
+BROUTER_TIMEOUT_S = 15
 GRID_DEG = 0.0003            # ~30 m : une case de la grille des endroits déjà courus
 QUIET = {"footway", "path", "pedestrian", "track", "cycleway", "living_street", "bridleway", "steps", "corridor"}
 CALM = {"residential", "service", "unclassified", "road"}
@@ -133,7 +137,7 @@ def novelty(points: list, done: set[tuple[int, int]]) -> float:
 
 def route(waypoints: list[tuple[float, float]]) -> Loop:
     lonlats = "|".join(f"{lon:.6f},{lat:.6f}" for lat, lon in waypoints)
-    res = requests.get(BROUTER_URL, timeout=max(settings.http_timeout, 20), headers={"User-Agent": USER_AGENT}, params={
+    res = requests.get(BROUTER_URL, timeout=BROUTER_TIMEOUT_S, headers={"User-Agent": USER_AGENT}, params={
         "lonlats": lonlats, "profile": PROFILE, "alternativeidx": 0, "format": "geojson"})
     res.raise_for_status()
     feature = res.json()["features"][0]
@@ -175,9 +179,16 @@ def find_loops(start: tuple[float, float], km: float, count: int = 3, runs: list
     done = run_cells(runs or []) if (runs or never_done) else set()
     bearings = [i * 360 / 8 for i in range(8)] if never_done else [i * 360 / 6 for i in range(6)]
     loops = []
-    for bearing in bearings:
+    pool = ThreadPoolExecutor(max_workers=ROUTES_WORKERS)
+    futures = [pool.submit(loop_at, start, km, b) for b in bearings]
+    _, late = wait(futures, timeout=ROUTES_BUDGET_S)
+    pool.shutdown(wait=False, cancel_futures=True)   # les orientations en retard sont abandonnées
+    for bearing, fut in zip(bearings, futures):   # ordre des orientations conservé : résultat déterministe
+        if fut in late:
+            logger.warning(f"Boucle vers {bearing:.0f}° ignorée : budget de {ROUTES_BUDGET_S} s dépassé")
+            continue
         try:
-            loop = loop_at(start, km, bearing)
+            loop = fut.result()
         except Exception as e:
             logger.warning(f"Boucle vers {bearing:.0f}° impossible : {e}")
             continue

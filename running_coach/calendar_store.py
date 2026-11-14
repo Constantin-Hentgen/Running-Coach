@@ -7,9 +7,9 @@
   ("Unable to guess TZID for tzinfo UTC"), ce qui cassait toute modification.
 """
 import datetime
-import functools
 import logging
 import re
+import threading
 import uuid
 
 import caldav
@@ -165,11 +165,15 @@ def apply_update(ics: str, *, summary=None, start=None, end=None, description=No
 # Accès serveur
 # ---------------------------------------------------------------------------
 
-@functools.cache
+_local = threading.local()   # un client (donc une session HTTP) par thread : asyncio.to_thread en lance plusieurs
+
+
 def get_calendar():
-    """Client CalDAV réutilisé (connexion HTTP keep-alive) au lieu d'un nouveau par appel."""
-    client = caldav.DAVClient(url=settings.radicale_url, username=settings.radicale_user, password=settings.radicale_pass)
-    return client.calendar(url=settings.radicale_url)
+    """Client CalDAV réutilisé par thread (keep-alive) au lieu d'un nouveau par appel, jamais partagé entre threads."""
+    if getattr(_local, "calendar", None) is None:
+        client = caldav.DAVClient(url=settings.radicale_url, username=settings.radicale_user, password=settings.radicale_pass)
+        _local.calendar = client.calendar(url=settings.radicale_url)
+    return _local.calendar
 
 
 def list_events(start: datetime.datetime, end: datetime.datetime) -> tuple[list[dict], int]:
@@ -269,11 +273,13 @@ def delete_event(uid: str) -> dict:
 SHOPPING_UID_SUFFIX = "@running-coach-shopping"
 
 
-@functools.cache
 def get_shopping_calendar():
-    client = caldav.DAVClient(url=settings.radicale_shopping_url, username=settings.radicale_user,
-                              password=settings.radicale_pass)
-    return client.calendar(url=settings.radicale_shopping_url)
+    """Comme get_calendar : un client par thread."""
+    if getattr(_local, "shopping", None) is None:
+        client = caldav.DAVClient(url=settings.radicale_shopping_url, username=settings.radicale_user,
+                                  password=settings.radicale_pass)
+        _local.shopping = client.calendar(url=settings.radicale_shopping_url)
+    return _local.shopping
 
 
 def item_label(item: dict) -> str:

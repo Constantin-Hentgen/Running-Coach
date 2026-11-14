@@ -52,7 +52,7 @@ flowchart LR
 
 | Module | Role |
 |---|---|
-| `running_coach/app.py` | FastAPI app (`/health`), starts the bot and the scheduler, connectivity checks |
+| `running_coach/app.py` | FastAPI app (`/health` only; `/docs`, `/redoc` and `/openapi.json` are disabled), starts the bot and the scheduler, connectivity checks |
 | `running_coach/bot.py` | Telegram handlers, commands, buttons, voice, briefing, weekly review, new-run detection, weather alerts |
 | `running_coach/agent.py` | System prompt, real-time context, model routing, tool loop with prompt caching |
 | `running_coach/tools.py` | Tools exposed to the model (calendar, memory, goals, proposals, shopping list), action ledger, verified report |
@@ -174,7 +174,7 @@ The `RAIN_ALERT_*` variables keep their historical names but drive all weather a
 | `WEEKLY_REVIEW_TIME` | `sun 19:00` | Weekly review day (`mon`…`sun`) and time; `off` = disabled (`/review` still works) |
 | `BOT_NAME` | `Bob` | The coach's name: his persona in the prompt, the bot's Telegram display name (set at startup) and the help text |
 | `GIPHY_API_KEY` | *(empty)* | Free GIPHY API key ([developers.giphy.com](https://developers.giphy.com)). With it, Bob now and then adds a funny GIF or meme, only to open a conversation (before his first message of a session) or to close one (after his last): at most one per chat session (a session ends after 90 min of silence), only when it illustrates what he says, never on a serious topic. Empty = no GIFs |
-| `NUTRITION_CHECK_TIME` | `21:45` | Evening nutrition check: if the day had a skipped or untracked main meal, intake far below (< 75 %) or above (> 140 %) needs, a very light main meal, or low protein / low carbs on a run day, Bob sends one short, kind message with an idea for tomorrow. Nothing when all is fine or nothing was logged; `off` = never |
+| `NUTRITION_CHECK_TIME` | `22:30` | Evening nutrition check: if the day had a skipped or untracked main meal, intake far below (< 75 %) or above (> 140 %) needs, a very light main meal, or low protein / low carbs on a run day, Bob sends one short, kind message with an idea for tomorrow. Nothing when all is fine or nothing was logged; `off` = never |
 | `NEW_DISH_TIME` | `sat 10:00` | Once a week, Bob suggests one new dish you've never had, picked to break what you eat most (from the food log), with its recipe on a button; never the same twice, and it can show up among the `/eat` options until you try it; `off` = never |
 | `SHOP_LAST_CALL` | `19:30` | After this time (until 7:00) `/eat` and meal suggestions only use what's in stock, nothing to buy (your shop is about to close); `off` = shopping always possible |
 | `EAT_SUGGEST_TIMES` | `07:00,11:30,18:30` | When to suggest dishes on its own, like `/eat`, just before each meal. Skipped when the coach knows the meal is eaten elsewhere (lunch on office days, from its memory and the calendar), when `/eat` was just asked, or when the meal is already logged; `off` = never |
@@ -333,7 +333,7 @@ The only paid service is the Anthropic API. Conversation, debriefs and commands 
 - **Secrets**: only in your environment (`.env` / stack variables), excluded from Git (`.gitignore`) and from the Docker image (`.dockerignore`). The code contains no key, URL or personal data.
 - **Sent to Anthropic** with each message: your message (for a voice note, its transcription: the audio itself never leaves your server), the upcoming calendar, the weather, the Dreeve data, your memory, goals and check-ins.
 - **Sent elsewhere, only for the features that need it**: `/routes` and `/newroute` send the start point (your home or work coordinates) and the loop's waypoints to [brouter.de](https://brouter.de), and fetch map tiles of that area from tile.openstreetmap.org; `/eat` sends dish names to fr.wikibooks.org; GIFs send short English keywords to GIPHY. Nothing personal is ever added to these requests.
-- **Stored locally**: memory + the last 3 exchanges in the `coach-data` volume. To wipe everything: `docker compose down -v`.
+- **Stored locally**: memory + the last `HISTORY_MESSAGES` chat messages (default 20) in the `coach-data` volume. To wipe everything: `docker compose down -v`.
 
 ---
 

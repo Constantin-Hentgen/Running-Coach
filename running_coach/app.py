@@ -118,7 +118,8 @@ async def lifespan(_: FastAPI):
             await tg_app.shutdown()
 
 
-app = FastAPI(lifespan=lifespan)
+# Pas de /docs, /redoc ni /openapi.json : rien à exposer publiquement hors /health
+app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 
 
 @app.get("/health")
