@@ -1,6 +1,6 @@
 [project]
 name = "running-coach-agent"
-version = "3.0.0"
+version = "3.1.0"
 description = "Autonomous Telegram Running Coach Agent"
 license = "MIT"
 readme = "README.md"

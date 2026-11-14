@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.0](https://github.com/Constantin-Hentgen/Running-Coach/compare/v3.0.0...v3.1.0) (2026-11-14)
+
+
+### Added
+
+* **routes:** /newroute options for distance, surface and place ([be52369](https://github.com/Constantin-Hentgen/Running-Coach/commit/be5236949a3ee3e8d0cd133008a83b05df05fe51)), closes [#40](https://github.com/Constantin-Hentgen/Running-Coach/issues/40)
+* **weather:** reason hour by hour on each session's exact slot ([cf23ca9](https://github.com/Constantin-Hentgen/Running-Coach/commit/cf23ca94f4bb85b2070ad60e08ca0656c1deb14e)), closes [#41](https://github.com/Constantin-Hentgen/Running-Coach/issues/41)
+
 ## [3.0.0] - 2026-11-14
 
 ### Removed
