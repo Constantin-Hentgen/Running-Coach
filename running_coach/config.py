@@ -12,6 +12,18 @@ UTC = datetime.timezone.utc
 logger = logging.getLogger(__name__)
 
 
+LANGUAGES = {"fr": "français", "en": "English"}
+
+
+def _language(value: str | None) -> str:
+    """BOT_LANGUAGE : « fr » (défaut) ou « en » ; « en-GB », « English »… sont acceptés."""
+    code = (value or "fr").strip().lower()[:2]
+    if code not in LANGUAGES:
+        logger.error(f"[CONFIG] BOT_LANGUAGE={value!r} non prise en charge ({', '.join(LANGUAGES)}) : français utilisé.")
+        return "fr"
+    return code
+
+
 def _str(name: str, default: str | None = None) -> str | None:
     """Valeur nettoyée ; vide = non définie. Retire des guillemets englobants (l'UI Portainer les conserve)."""
     value = os.getenv(name, "").strip()
@@ -167,6 +179,7 @@ class Settings:
     pantry_check_time: tuple[int, int] | None
     shop_last_call: tuple[int, int] | None
     bot_name: str
+    language: str
     nutrition_check_time: tuple[int, int] | None
     meal_check_times: list[tuple[int, int]]
     eat_suggest_times: list[tuple[int, int]]
@@ -222,6 +235,7 @@ class Settings:
             shop_last_call=_briefing_time(_str("SHOP_LAST_CALL", "19:30"), "SHOP_LAST_CALL"),
             nutrition_check_time=_briefing_time(_str("NUTRITION_CHECK_TIME", "22:00"), "NUTRITION_CHECK_TIME"),
             bot_name=" ".join((_str("BOT_NAME", "Bob") or "Bob").split())[:32] or "Bob",
+            language=_language(_str("BOT_LANGUAGE")),
             meal_check_times=_meal_times(_str("MEAL_CHECK_TIMES", "10:30,14:30,21:30")),
             eat_suggest_times=_meal_times(_str("EAT_SUGGEST_TIMES", "07:00,11:30,18:30"), "EAT_SUGGEST_TIMES"),
             meal_boxes=max(1, _int("MEAL_BOXES", 3)),
@@ -259,7 +273,7 @@ class Settings:
             "Dreeve MCP (DREEVE_MCP_KEY)": self.dreeve_mcp_key and self.dreeve_mcp_url,
             "Liste de courses dans l'agenda courses (RADICALE_SHOPPING_URL)": self.radicale_shopping_url,
             f"Messages vocaux (WHISPER_MODEL={self.whisper_model or 'off'})": self.whisper_model,
-            f"Météo ({', '.join(n for n, _, _ in self.weather_locations) or 'WEATHER_LOCATIONS'})": self.weather_enabled,
+            f"Météo ({', '.join(n for n, __, __ in self.weather_locations) or 'WEATHER_LOCATIONS'})": self.weather_enabled,
         }
         for name, ok in optional.items():
             logger.info(f"[CONFIG] {name} : {'activé' if ok else 'désactivé'}")
@@ -273,5 +287,10 @@ settings = Settings.from_env()
 TZ = settings.tz
 TZ_LABEL = TZ.key   # ex. « Europe/Paris », affiché au modèle
 
-FR_DAYS = ["lun", "mar", "mer", "jeu", "ven", "sam", "dim"]
-FR_DAYS_LONG = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
+# Jours affichés, dans la langue du bot (BOT_LANGUAGE)
+DAYS, DAYS_LONG = {
+    "fr": (["lun", "mar", "mer", "jeu", "ven", "sam", "dim"],
+           ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]),
+    "en": (["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+           ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]),
+}[settings.language]

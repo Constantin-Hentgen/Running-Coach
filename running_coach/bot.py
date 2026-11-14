@@ -36,6 +36,7 @@ from .handlers.ui import (
     without_button,  # noqa: F401
     without_proposal,
 )
+from .i18n import _
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +114,7 @@ class CoachBot(InfoMixin, KitchenMixin, MealsMixin, RunsMixin, JobsMixin):
             logger.warning(f"Mode configuration : message reçu du chat {chat_id}. Mets TELEGRAM_CHAT_ID={chat_id} dans .env.")
             if update.message:
                 await update.message.reply_text(
-                    f"👋 Configuration : ajoute TELEGRAM_CHAT_ID={chat_id} dans ton .env puis redémarre le conteneur."
+                    _("👋 Configuration : ajoute TELEGRAM_CHAT_ID={chat_id} dans ton .env puis redémarre le conteneur.").format(chat_id=chat_id)
                 )
             return False
         if chat_id != self.chat_id:
@@ -149,7 +150,7 @@ class CoachBot(InfoMixin, KitchenMixin, MealsMixin, RunsMixin, JobsMixin):
                 except Exception:   # un envoi raté ne doit pas laisser les messages suivants sans réponse
                     logger.exception("Réponse au message en échec")
                     with contextlib.suppress(Exception):
-                        await self._push("Oups, mon message n'est pas parti 🥲 Réessaie ?")
+                        await self._push(_("Oups, mon message n'est pas parti 🥲 Réessaie ?"))
         finally:
             self._draining = False
 
@@ -159,12 +160,12 @@ class CoachBot(InfoMixin, KitchenMixin, MealsMixin, RunsMixin, JobsMixin):
             return
         media = update.message.voice or update.message.audio
         if not voice.enabled():
-            await update.message.reply_text("🎙️ Les messages vocaux sont désactivés (WHISPER_MODEL=off). Écris-moi plutôt.")
+            await update.message.reply_text(_("🎙️ Les messages vocaux sont désactivés (WHISPER_MODEL=off). Écris-moi plutôt."))
             return
         duration = media.duration
         seconds = duration.total_seconds() if isinstance(duration, datetime.timedelta) else duration   # PTB v23 : timedelta
         if seconds and seconds > voice.MAX_SECONDS:
-            await update.message.reply_text(f"🎙️ Vocal trop long (max {voice.MAX_SECONDS // 60} min). Fais plus court ou écris-moi.")
+            await update.message.reply_text(_("🎙️ Vocal trop long (max {minutes} min). Fais plus court ou écris-moi.").format(minutes=voice.MAX_SECONDS // 60))
             return
         typing = asyncio.create_task(self._keep_typing(update))
         try:
@@ -172,14 +173,14 @@ class CoachBot(InfoMixin, KitchenMixin, MealsMixin, RunsMixin, JobsMixin):
             text = await asyncio.to_thread(voice.transcribe, bytes(data))
         except Exception as e:
             logger.exception("Transcription en échec")
-            await update.message.reply_text(f"❌ Je n'ai pas pu transcrire ce vocal ({type(e).__name__}). Réessaie ou écris-moi.")
+            await update.message.reply_text(_("❌ Je n'ai pas pu transcrire ce vocal ({error}). Réessaie ou écris-moi.").format(error=type(e).__name__))
             return
         finally:
             typing.cancel()
         if not text:
-            await update.message.reply_text("🎙️ Je n'ai rien entendu de clair. Tu peux réessayer ?")
+            await update.message.reply_text(_("🎙️ Je n'ai rien entendu de clair. Tu peux réessayer ?"))
             return
-        await update.message.reply_text(f"🎙️ « {text} »")
+        await update.message.reply_text(_("🎙️ « {text} »").format(text=text))
         await self._enqueue(update, text)
 
     async def on_error(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -188,7 +189,7 @@ class CoachBot(InfoMixin, KitchenMixin, MealsMixin, RunsMixin, JobsMixin):
             logger.error("Exception non gérée dans un handler", exc_info=context.error, extra={"update": str(update)})
             chat = update.effective_chat if isinstance(update, Update) else None
             if chat is not None and self.chat_id and str(chat.id) == self.chat_id:
-                await self._push("Oups, une erreur de mon côté 🥲 Réessaie dans un instant ?")
+                await self._push(_("Oups, une erreur de mon côté 🥲 Réessaie dans un instant ?"))
         except Exception:
             logger.exception("Gestionnaire d'erreurs en échec")
 
@@ -199,7 +200,7 @@ class CoachBot(InfoMixin, KitchenMixin, MealsMixin, RunsMixin, JobsMixin):
             reply = await agent.ask(prompt, chat_id=str(update.effective_chat.id), allow_writes=allow_writes, planning=planning)
         except Exception as e:
             logger.exception("Erreur non gérée")
-            reply = agent.AgentReply(f"❌ Erreur technique : {type(e).__name__}. Rien n'est garanti côté Radicale, vérifie l'agenda.")
+            reply = agent.AgentReply(_("❌ Erreur technique : {error}. Rien n'est garanti côté Radicale, vérifie l'agenda.").format(error=type(e).__name__))
         finally:
             typing.cancel()
         await self._deliver(reply, header, update)
@@ -242,14 +243,14 @@ class CoachBot(InfoMixin, KitchenMixin, MealsMixin, RunsMixin, JobsMixin):
                 await query.answer()
         except Exception:
             logger.exception(f"Bouton en échec : {query.data}")
-            await query.answer("❌ Erreur technique", show_alert=True)
+            await query.answer(_("❌ Erreur technique"), show_alert=True)
 
     async def _on_proposal(self, update: Update, action: str, pid: str) -> None:
         query = update.callback_query
         status = {"a": "applied", "e": "adjusting", "x": "ignored"}[action]
         item = store.close_proposal(pid, status)
         if item is None:
-            await query.answer("Déjà traité.")
+            await query.answer(_("Déjà traité."))
             return
         await query.answer()
         remaining = without_proposal(query.message.reply_markup, pid)
@@ -265,12 +266,12 @@ class CoachBot(InfoMixin, KitchenMixin, MealsMixin, RunsMixin, JobsMixin):
             await agent.add_to_history(self.chat_id, f"[L'athlète veut ajuster ta proposition : {item['text']}]",
                                        "Dis-moi ce que tu veux changer.")
             if item["kind"] == "weather":
-                await self._push("Ok, dis-moi ce que tu veux changer 👂")
+                await self._push(PROPOSAL_OUTCOME["e"])
         else:
             await agent.add_to_history(self.chat_id, f"[L'athlète a ignoré ta proposition : {item['text']}]",
                                        "D'accord, on garde le programme tel quel.")
             if item["kind"] == "weather":
-                await self._push("Ok, on garde comme ça 👍")
+                await self._push(PROPOSAL_OUTCOME["x"])
 
 
 def build_bot() -> CoachBot:
@@ -284,7 +285,7 @@ def build_bot() -> CoachBot:
         "routes": bot.on_routes, "newroute": bot.on_new_route, "debrief": bot.on_debrief, "review": bot.on_review,
         "shopping": bot.on_shopping, "briefing": bot.on_briefing, "help": bot.on_help,
     }
-    for name, aliases, _ in commands.COMMANDS:
+    for name, aliases, __ in commands.COMMANDS:
         app.add_handler(CommandHandler([name, *aliases], handlers[name]))
     app.add_handler(CallbackQueryHandler(bot.on_button))
     app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, bot.on_voice))

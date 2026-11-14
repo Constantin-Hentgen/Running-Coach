@@ -14,6 +14,7 @@ from ..config import TZ, settings
 from ..formatting import md_escape, md_unescape
 from ..memory import PANTRY_ASK_GRACE_DAYS, store
 from .ui import MEAL_HINT, meal_rows, open_meals, pantry_check_markup, send_text, shopping_markup, shopping_text, without_button
+from ..i18n import _
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,7 @@ class KitchenMixin:
             return
         lst = store.shopping_list
         if lst is None:
-            await update.message.reply_text("🛒 Pas de liste de courses en cours. Lance /shopping pour en créer une.")
+            await update.message.reply_text(_("🛒 Pas de liste de courses en cours. Lance /shopping pour en créer une."))
             return
         await send_text(update.message.reply_text, shopping_text(lst), shopping_markup(lst))
 
@@ -37,9 +38,9 @@ class KitchenMixin:
             return
         lst = store.shopping_list
         if lst is None:
-            await update.message.reply_text("🍳 Pas de liste de courses en cours : lance d'abord /shopping.")
+            await update.message.reply_text(_("🍳 Pas de liste de courses en cours : lance d'abord /shopping."))
             return
-        regenerate = bool(context.args) and context.args[0].lower() in ("new", "nouvelles", "autres")
+        regenerate = bool(context.args) and context.args[0].lower() in ("new", "nouvelles", "autres", "other", "more")
         if lst.get("recipes") and not regenerate:
             meals = open_meals(lst.get("recipe_meals") or [])
             await send_text(update.message.reply_text, lst["recipes"] + (f"\n\n{MEAL_HINT}" if meals else ""),
@@ -50,11 +51,11 @@ class KitchenMixin:
             reply = await agent.ask(commands.recipes_prompt(lst), chat_id=str(update.effective_chat.id), allow_writes=False)
         except Exception as e:
             logger.exception("Recettes en échec")
-            reply = agent.AgentReply(f"❌ Recettes impossibles : {type(e).__name__}")
+            reply = agent.AgentReply(_("❌ Recettes impossibles : {error}").format(error=type(e).__name__))
         finally:
             typing.cancel()
         if not reply.text.startswith("❌"):
-            store.set_recipes(lst["id"], reply.text, [mid for mid, _ in reply.meals])
+            store.set_recipes(lst["id"], reply.text, [mid for mid, __ in reply.meals])
             if lst.get("event_uid"):   # les recettes rejoignent la checklist dans l'événement courses
                 await self._sync_shopping_event(lst["id"])
         await self._deliver(reply, update=update)
@@ -74,12 +75,12 @@ class KitchenMixin:
         query = update.callback_query
         item = store.answer_pantry_check(int(pantry_id), still_there, datetime.datetime.now(TZ).date())
         if item is None:
-            await query.answer("Déjà retiré du stock.")
+            await query.answer(_("Déjà retiré du stock."))
         else:
-            await query.answer(f"{item['name']} : encore là 👍" if still_there else f"{item['name']} : retiré du stock 🗑️")
+            await query.answer((_("{item} : encore là 👍") if still_there else _("{item} : retiré du stock 🗑️")).format(item=item['name']))
         markup = without_button(query.message.reply_markup, f"k:y:{pantry_id}")
         if markup is None:
-            await query.edit_message_text("Merci 🙏")
+            await query.edit_message_text(_("Merci 🙏"))
         else:
             await query.edit_message_reply_markup(markup)
 
@@ -91,7 +92,7 @@ class KitchenMixin:
         lst = (store.toggle_shopping_item(parts[2], int(parts[3])) if parts[1] == "t"
                else store.reset_shopping(parts[2]))
         if lst is None:
-            await query.answer("Cette liste a été remplacée : /list affiche la liste en cours.", show_alert=True)
+            await query.answer(_("Cette liste a été remplacée : /list affiche la liste en cours."), show_alert=True)
             return
         await query.answer()
         try:
@@ -127,12 +128,13 @@ class KitchenMixin:
                 return
             lines = []
             if due:
-                lines.append("🥫 *Encore là ?* Ces produits frais arrivent à échéance :")
+                lines.append(_("🥫 *Encore là ?* Ces produits frais arrivent à échéance :"))
                 lines += [f"- {md_escape(p['name'])}" + (f" ({md_escape(p['qty'])})" if p.get("qty") else "")
-                          + f" · acheté il y a {(today - datetime.date.fromisoformat(p['added'])).days} j" for p in due]
-                lines.append(f"_Sans réponse sous {PANTRY_ASK_GRACE_DAYS} j, je les retire du stock._")
+                          + _(" · acheté il y a {days} j").format(days=(today - datetime.date.fromisoformat(p['added'])).days)
+                          for p in due]
+                lines.append(_("_Sans réponse sous {days} j, je les retire du stock._").format(days=PANTRY_ASK_GRACE_DAYS))
             if expired:
-                lines.append(f"🗑️ Retirés du stock (pas de réponse) : {md_escape(', '.join(expired))}")
+                lines.append(_("🗑️ Retirés du stock (pas de réponse) : {items}").format(items=md_escape(', '.join(expired))))
             text = "\n".join(lines)
             await self._push(text, pantry_check_markup(due) if due else None)
             store.mark_pantry_asked([p["id"] for p in due], today)

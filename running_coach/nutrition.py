@@ -76,7 +76,7 @@ def search(query: str, limit: int = 5) -> list[dict]:
         first = _score(q[0], ft[:1])   # le nom commence par le mot principal
         scored.append((first > 0, round(score / len(q), 3), first, -len(ft), food))
     scored.sort(key=lambda s: s[:4], reverse=True)   # d'abord les noms qui commencent par le mot principal
-    return [public(f) for *_, f in scored[:limit]]
+    return [public(f) for *__, f in scored[:limit]]
 
 
 def public(food: dict) -> dict:
@@ -201,9 +201,9 @@ def energy_context(meals: list[dict], runs: list[dict], profile: dict, today: da
     logged = [(d, day_totals(meals, d)) for d in week]
     logged = [(d, t) for d, t in logged if t["meals"] >= 2]   # journal trop incomplet : on ne juge pas la journée
     if logged:
-        avg = {k: sum(t[k] for _, t in logged) / len(logged) for k in NUTRIENTS}
+        avg = {k: sum(t[k] for __, t in logged) / len(logged) for k in NUTRIENTS}
         line = f"- 7 derniers jours ({len(logged)} jours bien notés) : moyenne {avg['kcal']:.0f} kcal/j"
-        needs = [day_needs(profile, runs, d)[0] for d, _ in logged]
+        needs = [day_needs(profile, runs, d)[0] for d, __ in logged]
         if all(needs):
             balance = avg["kcal"] - sum(needs) / len(needs)
             line += f", besoins ~{sum(needs) / len(needs):.0f} → {'déficit' if balance < 0 else 'surplus'} moyen ~{abs(balance):.0f} kcal/j"

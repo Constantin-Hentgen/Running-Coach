@@ -25,6 +25,7 @@ from xml.sax.saxutils import escape
 import requests
 
 from .config import settings
+from .i18n import _, decimal, plural
 
 logger = logging.getLogger(__name__)
 
@@ -200,7 +201,7 @@ def loop_at(start: tuple[float, float], km: float, bearing: float) -> Loop:
     """Triangle départ → A → B → départ, orienté vers `bearing`, ajusté une fois pour coller à la distance."""
     radius = km / (3 * ROUTE_FACTOR)
     best = None
-    for _ in range(2):
+    for __ in range(2):
         a = offset(*start, radius, bearing - 30)
         b = offset(*start, radius, bearing + 30)
         loop = route([start, a, b, start])
@@ -221,7 +222,7 @@ def find_loops(start: tuple[float, float], km: float, count: int = 3, runs: list
     loops = []
     pool = ThreadPoolExecutor(max_workers=ROUTES_WORKERS)
     futures = [pool.submit(loop_at, start, km, b) for b in bearings]
-    _, late = wait(futures, timeout=ROUTES_BUDGET_S)
+    __, late = wait(futures, timeout=ROUTES_BUDGET_S)
     pool.shutdown(wait=False, cancel_futures=True)   # les orientations en retard sont abandonnées
     for bearing, fut in zip(bearings, futures):   # ordre des orientations conservé : résultat déterministe
         if fut in late:
@@ -269,7 +270,7 @@ def to_map_png(loop: Loop, start: tuple[float, float]) -> bytes:
     from staticmap import CircleMarker, Line, StaticMap
     m = StaticMap(800, 800, padding_x=40, padding_y=40, url_template="https://tile.openstreetmap.org/{z}/{x}/{y}.png",
                   headers={"User-Agent": USER_AGENT})
-    coords = [(lon, lat) for lat, lon, _ in loop.points]
+    coords = [(lon, lat) for lat, lon, __ in loop.points]
     m.add_line(Line(coords, "white", 9))
     m.add_line(Line(coords, "#FF5A1F", 5))
     m.add_marker(CircleMarker((start[1], start[0]), "white", 18))
@@ -296,18 +297,19 @@ def geocode(query: str, near: tuple[float, float] | None = None) -> tuple[str, f
 
 
 def describe(loop: Loop, surface: str = "mixte") -> str:
-    parts = [f"{loop.km:.1f} km".replace(".", ",")]
+    pct = lambda x: f"{x * 100:.0f}"   # noqa: E731
+    parts = [decimal(f"{loop.km:.1f}") + " km"]
     if surface == "route":
-        parts += [f"{loop.paved * 100:.0f} % bitume", f"{loop.safe * 100:.0f} % voies calmes",
-                  f"{loop.crossings} traversée{'s' if loop.crossings > 1 else ''}"]
+        parts += [_("{pct} % bitume").format(pct=pct(loop.paved)), _("{pct} % voies calmes").format(pct=pct(loop.safe)),
+                  (_("{n} traversées") if plural(loop.crossings) else _("{n} traversée")).format(n=loop.crossings)]
     elif surface == "nature":
-        parts.append(f"{(1 - loop.paved) * 100:.0f} % nature")
+        parts.append(_("{pct} % nature").format(pct=pct(1 - loop.paved)))
     else:
-        parts.append(f"{loop.safe * 100:.0f} % chemins et rues calmes")
+        parts.append(_("{pct} % chemins et rues calmes").format(pct=pct(loop.safe)))
     if loop.marked >= 0.15:
-        parts.append(f"{loop.marked * 100:.0f} % sur sentiers balisés")
+        parts.append(_("{pct} % sur sentiers balisés").format(pct=pct(loop.marked)))
     if loop.climb >= 20:
         parts.append(f"D+ {loop.climb} m")
     if loop.novelty is not None:
-        parts.append(f"{loop.novelty * 100:.0f} % jamais couru")
+        parts.append(_("{pct} % jamais couru").format(pct=pct(loop.novelty)))
     return " · ".join(parts)

@@ -11,6 +11,7 @@ from .. import agent, dreeve
 from ..config import TZ, settings
 from ..memory import LEGS, store
 from .ui import PAIN_FOLLOW_UP, legs_markup, rpe_markup
+from ..i18n import _
 
 logger = logging.getLogger(__name__)
 
@@ -37,10 +38,10 @@ class RunsMixin:
         try:
             runs = await asyncio.to_thread(dreeve.get_recent_runs, 1) if settings.dreeve_enabled else []
         except Exception as e:
-            await update.message.reply_text(f"❌ Dreeve indisponible : {e}")
+            await update.message.reply_text(_("❌ Dreeve indisponible : {error}").format(error=e))
             return
         if not runs:
-            await update.message.reply_text("Aucun run trouvé dans Dreeve.")
+            await update.message.reply_text(_("Aucun run trouvé dans Dreeve."))
             return
         prompt = DEBRIEF_PROMPT.format(intro="Débriefe ma dernière séance", runs=dreeve.format_activity(runs[0]))
         await self._ask_and_reply(update, prompt, allow_writes=False)
@@ -53,11 +54,11 @@ class RunsMixin:
             rpe = int(value)
             store.set_checkin(activity_id, rpe=rpe)
             await query.edit_message_text(
-                f"{rpe}/10, ok 👌 Et les jambes ?",
+                _("{rpe}/10, ok 👌 Et les jambes ?").format(rpe=rpe),
                 parse_mode=ParseMode.MARKDOWN, reply_markup=legs_markup(activity_id))
         elif step == "l" and value in LEGS:
             store.set_checkin(activity_id, legs=value)
-            await query.edit_message_text("Merci 🙏" if value != "douleur" else "Aïe 😬")
+            await query.edit_message_text(_("Merci 🙏") if value != "douleur" else _("Aïe 😬"))
             if value == "douleur":
                 await agent.add_to_history(self.chat_id, "[Ressenti après séance : douleur signalée]", PAIN_FOLLOW_UP)
                 await self._push(PAIN_FOLLOW_UP)
@@ -72,7 +73,7 @@ class RunsMixin:
             return
         store.set_checkin(activity_id, date=(run.get("startDateLocal") or "")[:10] or None,
                           minutes=round((run.get("movingTimeInSeconds") or 0) / 60), name=run.get("name"))
-        await self._push("Alors, t'as senti comment ? Effort de 1 (tranquille) à 10 (à bloc) :", rpe_markup(activity_id))
+        await self._push(_("Alors, t'as senti comment ? Effort de 1 (tranquille) à 10 (à bloc) :"), rpe_markup(activity_id))
 
     async def check_new_activity(self, source: str = "polling") -> bool:
         """Débriefe chaque run apparu dans Dreeve depuis le dernier vu, puis demande le ressenti.
@@ -108,8 +109,8 @@ class RunsMixin:
                 reply = await asyncio.wait_for(agent.ask(prompt, chat_id=self.chat_id, allow_writes=False), DEBRIEF_TIMEOUT_S)
             except Exception:   # l'agent (en échec ou bloqué) ne doit pas faire perdre le récap : au moins les chiffres
                 logger.exception("Débrief de séance : agent en échec, envoi du récap brut")
-                reply = agent.AgentReply(f"J'ai vu passer ta sortie 🏃 mais j'ai pas réussi à la regarder en détail 🥲 "
-                                         f"Tape /debrief pour réessayer.\n{runs_text}")
+                reply = agent.AgentReply(_("J'ai vu passer ta sortie 🏃 mais j'ai pas réussi à la regarder en détail 🥲 "
+                                           "Tape /debrief pour réessayer.") + f"\n{runs_text}")
             try:
                 await self._deliver(reply)   # Bob réagit lui-même à la sortie, sans en-tête de notification
             except Exception as e:   # run non marqué comme vu : nouvel essai au prochain passage

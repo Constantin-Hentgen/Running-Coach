@@ -13,6 +13,7 @@ from .coaching import box_count
 from .config import settings
 from .formatting import md_escape
 from .memory import CATEGORIES, GOAL_KINDS, GOAL_PRIORITIES, format_goal, store
+from .i18n import _
 
 logger = logging.getLogger(__name__)
 
@@ -325,7 +326,7 @@ def tool_save_shopping_list(args: dict, ledger: Ledger) -> dict:
 # ---------------------------------------------------------------------------
 
 # Lieu d'entraînement (stocké dans le champ LOCATION de l'événement) : sert à l'alerte pluie.
-_PLACES = [name for name, _, _ in settings.weather_locations]
+_PLACES = [name for name, __, __ in settings.weather_locations]
 _LOCATION_PROP = {
     "location": {
         "type": "string",
@@ -747,14 +748,14 @@ def tool_set_profile(args: dict, ledger: Ledger) -> dict:
 RECIPE_TOOL = {
     "name": "search_recipe",
     "description": (
-        "Cherche des recettes de base dans le Livre de cuisine libre de Wikibooks (français, CC BY-SA) : renvoie les plus "
+        "Cherche des recettes de base dans le livre de cuisine libre de Wikibooks (dans la langue du bot, CC BY-SA) : renvoie les plus "
         "proches avec ingrédients et préparation. Pour /eat, avant d'écrire la recette d'un plat : appuie-toi dessus si "
         "elle colle, en la simplifiant et en l'adaptant au stock, et termine alors la recette par « 📖 » + son lien. "
         "Si rien ne colle, écris la recette toi-même, sans lien."
     ),
     "input_schema": {
         "type": "object",
-        "properties": {"query": {"type": "string", "description": "le nom du plat seulement, ex: « tortilla », "
+        "properties": {"query": {"type": "string", "description": "le nom du plat seulement, dans la langue du bot, ex: « tortilla », "
                                  "« lentilles au thon » (jamais d'info personnelle)"}},
         "required": ["query"],
     },
@@ -864,7 +865,9 @@ def run_tool(name: str, args: dict, ledger: Ledger, allowed: set[str]) -> dict:
 # ---------------------------------------------------------------------------
 
 _VERBS = {"create": "Créé", "update": "Modifié", "delete": "Supprimé"}
-_FAILED_VERBS = {"create": "ajouter", "update": "modifier", "delete": "supprimer"}
+_FAILED = {"create": _("⚠️ J'ai pas réussi à ajouter « {event} » dans ton agenda. On réessaie ?"),
+           "update": _("⚠️ J'ai pas réussi à modifier « {event} » dans ton agenda. On réessaie ?"),
+           "delete": _("⚠️ J'ai pas réussi à supprimer « {event} » dans ton agenda. On réessaie ?")}
 
 
 def build_report(ledger: Ledger, truncated: bool, error: str | None = None) -> str:
@@ -875,11 +878,11 @@ def build_report(ledger: Ledger, truncated: bool, error: str | None = None) -> s
         if a.ok:
             continue
         if a.kind in _VERBS:
-            lines.append(f"⚠️ J'ai pas réussi à {_FAILED_VERBS[a.kind]} « {md_escape(a.label)} » dans ton agenda. On réessaie ?")
+            lines.append(_FAILED[a.kind].format(event=md_escape(a.label)))
         elif a.kind == "shopping_event":
-            lines.append("⚠️ J'ai pas réussi à mettre ta liste de courses dans l'agenda courses.")
+            lines.append(_("⚠️ J'ai pas réussi à mettre ta liste de courses dans l'agenda courses."))
     if truncated:
-        lines.append("⚠️ J'ai dû m'arrêter en route, jette un œil à ton agenda pour vérifier.")
+        lines.append(_("⚠️ J'ai dû m'arrêter en route, jette un œil à ton agenda pour vérifier."))
     if error:
-        lines.append("⚠️ J'ai eu un bug en route 🥲 Réessaie ?")
+        lines.append(_("⚠️ J'ai eu un bug en route 🥲 Réessaie ?"))
     return "\n".join(lines)
