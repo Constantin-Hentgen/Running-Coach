@@ -76,7 +76,7 @@ def test_corrupt_file_is_backed_up(tmp_path):
     path.write_text("{not json")
     s = Store(path, seed=SEED)
     assert len(s.memories) == 2
-    assert (tmp_path / "state.bak").exists()
+    assert list(tmp_path.glob("state.json.corrupt-*"))   # sauvegarde horodatée
 
 
 def test_memory_tools_go_through_ledger_and_report(store):

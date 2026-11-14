@@ -77,6 +77,7 @@ class Store:
         self.path = path
         self._seed = seed or []
         self._lock = threading.Lock()
+        self.last_save_error: str | None = None   # message de la dernière écriture ratée, None si elle a réussi
         self.state = self._load()
 
     # --- persistance ----------------------------------------------------------
@@ -87,8 +88,14 @@ class Store:
         except FileNotFoundError:
             state = {}
         except Exception as e:
-            logger.error(f"Mémoire illisible ({self.path}) : {e} — repart de zéro (fichier conservé en .bak)")
-            self.path.replace(self.path.with_suffix(".bak"))
+            stamp = datetime.datetime.now(TZ).strftime("%Y%m%d-%H%M%S")
+            backup = self.path.with_name(f"{self.path.name}.corrupt-{stamp}")
+            n = 1
+            while backup.exists():   # deux corruptions dans la même seconde : ne jamais écraser
+                backup = self.path.with_name(f"{self.path.name}.corrupt-{stamp}-{n}")
+                n += 1
+            logger.error(f"Mémoire illisible ({self.path}) : {e} — repart de zéro (fichier conservé : {backup})")
+            self.path.replace(backup)
             state = {}
         state.setdefault("memories", [])
         state.setdefault("next_id", 1)
@@ -129,10 +136,15 @@ class Store:
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self.path.with_suffix(".tmp")
-            tmp.write_text(json.dumps(self.state, ensure_ascii=False, indent=1), encoding="utf-8")
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.write(json.dumps(self.state, ensure_ascii=False, indent=1))
+                f.flush()
+                os.fsync(f.fileno())
             os.replace(tmp, self.path)
+            self.last_save_error = None
         except Exception as e:
-            logger.error(f"Impossible d'écrire la mémoire ({self.path}) : {e}")
+            self.last_save_error = f"{type(e).__name__}: {e}"   # le bot ne plante pas, mais l'échec reste visible
+            logger.exception(f"Impossible d'écrire la mémoire ({self.path})")
 
     @staticmethod
     def _append(state: dict, category: str, text: str, source: str, priority: int = DEFAULT_PRIORITY) -> dict:
@@ -164,12 +176,17 @@ class Store:
         if category not in CATEGORIES:
             category = "autre"
         with self._lock:
+            # Validation d'abord, sans rien modifier : un échec ne doit jamais faire perdre le souvenir remplacé.
+            memories = self.state["memories"]
+            if replaces is not None and not any(m["id"] == replaces for m in memories):
+                raise LookupError(f"aucun souvenir #{replaces}")
+            others = [m for m in memories if m["id"] != replaces]   # sans le souvenir remplacé
+            if any(m["text"].casefold() == text.casefold() for m in others):
+                raise ValueError("déjà mémorisé")
+            if len(others) >= MAX_ITEMS:
+                raise ValueError(f"mémoire pleine ({MAX_ITEMS}) : oublie ou fusionne des éléments obsolètes d'abord")
             if replaces is not None:
                 self._remove(replaces)
-            if any(m["text"].casefold() == text.casefold() for m in self.state["memories"]):
-                raise ValueError("déjà mémorisé")
-            if len(self.state["memories"]) >= MAX_ITEMS:
-                raise ValueError(f"mémoire pleine ({MAX_ITEMS}) : oublie ou fusionne des éléments obsolètes d'abord")
             item = self._append(self.state, category, text, source, priority_of(priority))
             self._save()
         return item
