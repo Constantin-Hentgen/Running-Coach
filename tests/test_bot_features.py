@@ -1449,7 +1449,7 @@ def test_meal_suggestion_is_about_the_meal_coming_now():
     assert "jamais pour un repas suivant" in morning and "ce midi" not in morning
 
 
-def test_evening_nutrition_check_sends_once_only_when_something_is_off(tmp_path, monkeypatch):
+def test_evening_recap_daily_and_coach_note_only_when_something_is_off(tmp_path, monkeypatch):
     b, store = _bot(tmp_path, monkeypatch)
     asked = []
 
@@ -1460,15 +1460,18 @@ def test_evening_nutrition_check_sends_once_only_when_something_is_off(tmp_path,
     monkeypatch.setattr(bot_module.agent, "ask", fake_ask)
     monkeypatch.setattr(bot_module.dreeve, "get_all_runs", lambda: [])
     _at(monkeypatch, 21, 45, day=14)
-    asyncio.run(b.check_nutrition())                                          # nothing logged: quiet
-    assert not asked
+    asyncio.run(b.check_nutrition())                       # nothing logged: a short recap asking, no coach note
+    assert not asked and "Rien de noté aujourd'hui" in b.sent[-1][0] and "sauté" not in b.sent[-1][0]
     store.state["meal_checks"].clear()
     store.log_meal("Pâtes", datetime.datetime(2026, 11, 14, 20, 0, tzinfo=bot_module.TZ), kcal=700)
     asyncio.run(b.check_nutrition())
+    recap = next(t for t, _ in b.sent if "Ta journée côté assiette" in t and "Pâtes" in t)
+    assert "700 kcal" in recap and "20:00 Pâtes" in recap
     assert "aucune trace du petit-déjeuner" in asked[-1] and "culpabiliser" in asked[-1]
     assert b.sent[-1][0].strip() == "Demain, un vrai petit-déj 🥣"
+    sent = len(b.sent)
     asyncio.run(b.check_nutrition())                                          # once a day
-    assert len(asked) == 1
+    assert len(asked) == 1 and len(b.sent) == sent
 
 
 def test_newroute_asks_surface_then_distance_with_buttons(tmp_path, monkeypatch):
@@ -1598,3 +1601,21 @@ def test_meal_question_offers_every_box_and_answers_a_duplicate(tmp_path, monkey
     assert b.sent[-1][0].strip() == "C'était déjà noté à 12:45 👌"
     assert len(store.meals_since(datetime.date(2026, 11, 11))) == 1
     assert any(p["name"] == "Chili" for p in store.pantry)    # la boîte n'est pas retirée deux fois
+
+
+def test_day_recap_lists_dishes_and_compares_calories_to_needs():
+    from running_coach.formatting import md_unescape
+    day = datetime.date(2026, 11, 14)
+    meals = [{"id": 1, "date": "2026-11-14", "time": "08:00", "text": "Porridge banane", "kcal": 450, "protein_g": 15,
+              "carbs_g": 70, "fat_g": 10},
+             {"id": 2, "date": "2026-11-14", "time": "12:30", "text": "Curry de poulet", "kcal": 700, "protein_g": 45,
+              "carbs_g": 80, "fat_g": 20},
+             {"id": 3, "date": "2026-11-13", "time": "20:00", "text": "Hier soir", "kcal": 900}]
+    profile = {"weight_kg": 70, "height_cm": 178, "birth_year": 1995, "sex": "m"}
+    text = md_unescape(commands.format_day_recap(meals, [], profile, day)).replace("*", "")
+    assert text.startswith("🌙 Ta journée côté assiette (sam 14/11)")
+    assert "🔥 1 150 kcal sur ~" in text and "il te manque ~" in text
+    assert "- 08:00 Porridge banane · 450 kcal" in text and "- 12:30 Curry de poulet · 700 kcal" in text
+    assert "Hier soir" not in text and "60 g protéines" in text
+    no_profile = md_unescape(commands.format_day_recap(meals, [], {}, day)).replace("*", "")
+    assert "🔥 1 150 kcal aujourd'hui" in no_profile and "ton poids" in no_profile

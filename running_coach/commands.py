@@ -206,6 +206,34 @@ def format_nutrition(meals: list[dict], runs: list[dict], profile: dict, today: 
     return "\n".join(lines)
 
 
+def format_day_recap(meals: list[dict], runs: list[dict], profile: dict, day: datetime.date) -> str:
+    """Bilan du soir : chaque plat mangé avec ses calories, le total du jour face aux besoins, et les macros.
+    Calculé par le code (table Ciqual, besoins = métabolisme × activité + runs Dreeve), sans IA."""
+    from . import nutrition
+    of_day = [m for m in meals if m["date"] == day.isoformat()]
+    title = f"🌙 *Ta journée côté assiette* ({FR_DAYS[day.weekday()]} {day:%d/%m})"
+    if not of_day:
+        return f"{title}\nRien de noté aujourd'hui 🤔 Tu as mangé quoi ? Dis-le-moi, je fais le bilan."
+    t = nutrition.day_totals(meals, day)
+    needs, running = nutrition.day_needs(profile, runs, day)
+    if needs:
+        burned = f" (dont 🏃 {_n(running)})" if running else ""
+        gap = needs - t["kcal"]
+        verdict = ("objectif atteint 👌" if gap <= needs * 0.1
+                   else f"il te manque ~{_n(gap)} kcal pour couvrir ta journée 💪")
+        total = f"🔥 *{_n(t['kcal'])} kcal* sur ~{_n(needs)} de besoins{burned} → {verdict}"
+    else:
+        total = f"🔥 *{_n(t['kcal'])} kcal* aujourd'hui"
+    lines = [title, total,
+             f"🥩 {t['protein_g']:.0f} g protéines · 🍚 {t['carbs_g']:.0f} g glucides · 🧈 {t['fat_g']:.0f} g lipides"]
+    for m in of_day:
+        kcal = f" · {_n(m['kcal'])} kcal" if m.get("kcal") is not None else ""
+        lines.append(f"- {m['time']} {md_escape(m['text'])}{kcal}")
+    if not needs:
+        lines.append("_Donne-moi ton poids, ta taille, ton année de naissance et ton sexe pour comparer à tes besoins._")
+    return "\n".join(lines)
+
+
 def shops_open(now: datetime.datetime) -> bool:
     """Encore le temps d'aller acheter quelque chose (SHOP_LAST_CALL, « off » = toujours ; la nuit, jamais)."""
     if not settings.shop_last_call:
@@ -282,8 +310,9 @@ NUTRITION_CHECK_PROMPT = (
     "Écris-moi comme un pote qui me soutient : 1 ou 2 messages très courts, bienveillants, sans culpabiliser ni faire "
     "la leçon. Le point le plus important seulement, et une idée concrète et simple pour faire mieux demain (petit-déj, "
     "collation…), si possible avec ce que j'ai en stock. Garde en tête le long terme : c'est la tendance qui compte. "
-    "Si un repas n'a « aucune trace », demande-moi simplement ce que j'ai mangé plutôt que de supposer que je l'ai "
-    "sauté. Ne modifie rien."
+    "Le bilan chiffré vient de m'être envoyé : ne le répète pas. Si un repas n'a « aucune trace », demande-moi simplement "
+    "ce que j'ai mangé (mes boîtes du stock ?) plutôt que de supposer que je l'ai sauté ; si un plat est noté deux fois, "
+    "demande si c'est un doublon. Ne modifie rien."
 )
 
 NEW_DISH_PROMPT = (

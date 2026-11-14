@@ -119,16 +119,24 @@ class MealsMixin:
         await agent.add_to_history(self.chat_id, f"[Réponse à « qu'as-tu mangé ? » ({slot})]", text)
 
     async def check_nutrition(self) -> None:
-        """Le soir (NUTRITION_CHECK_TIME) : si la journée manque de quelque chose (repas sauté ou sans trace, apports trop
-        bas ou trop hauts, protéines ou glucides bas), un mot bienveillant ; rien si tout va bien ou si rien n'est noté."""
-        today = datetime.datetime.now(TZ).date()
+        """Le soir (NUTRITION_CHECK_TIME) : le bilan du jour (plats, calories face aux besoins, macros), calculé par le
+        code ; puis, si la journée manque de quelque chose (apports bas, repas léger ou sans trace, doublon dans le
+        journal…), un mot bienveillant du coach."""
+        now = datetime.datetime.now(TZ)
+        today = now.date()
         key = f"{today.isoformat()} nutrition"
         try:
             if store.meal_check(key):
                 return
             runs = await asyncio.to_thread(dreeve.get_all_runs) if settings.dreeve_enabled else []
-            issues = nutrition.anomalies(store.meals_since(today), runs, store.profile, today)
+            meals = store.meals_since(today - datetime.timedelta(days=1))
             store.set_meal_check(key, "checked")
+            recap = commands.format_day_recap(meals, runs, store.profile, today)
+            await self._push(recap)
+            await agent.add_to_history(self.chat_id, "[Bilan nutrition du soir envoyé par le système]", md_unescape(recap))
+            issues = nutrition.anomalies(meals, runs, store.profile, today)
+            issues += [i for i in nutrition.log_issues(meals, today, now)
+                       if "aujourd'hui" in i and ("deux fois" in i or "repas complets" in i)]   # doublons du journal
             if not issues:
                 return
             logger.info(f"Contrôle nutrition : {issues}")
