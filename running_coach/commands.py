@@ -53,7 +53,7 @@ HELP_TEXT = """🏃 *Salut, c'est Bob* 🤖
 /shopping — liste de courses pour 7 jours selon tes objectifs sportifs et santé (/shopping 3 pour 3 jours), à cocher au magasin
 /list — réaffiche ta liste de courses en cours, à cocher
 /recipes — recettes faciles à préparer en boîtes avec ta liste (/recipes new pour en avoir d'autres)
-/eat — quoi manger maintenant : 3 idées (⚡ express, 😌 chill, 🤤 gourmand) selon ton stock et ton entraînement, la recette quand tu choisis
+/eat — quoi manger maintenant : 3 idées (une rapide, une tranquille, une gourmande) selon ton stock et ton entraînement, la recette quand tu choisis
 /stock — ce que tu as en cuisine : les articles cochés sur ta liste y entrent, les plats que tu marques « mangé » ou « cuisiné » en sortent, et je te demande si les produits frais sont encore là quand ils arrivent à échéance
 /briefing — briefing complet, ajuste le programme dans l'agenda
 /meme — un mème qui résume ta journée d'entraînement 😂
@@ -84,17 +84,35 @@ def shops_open(now: datetime.datetime) -> bool:
     return datetime.time(7, 0) <= now.time() < datetime.time(*settings.shop_last_call)
 
 
+def meal_now(now: datetime.datetime) -> str:
+    """Le repas qu'on va manger maintenant (ou juste après) : c'est le seul dont on parle."""
+    h = now.hour + now.minute / 60
+    if 4 <= h < 10.5:
+        return "petit-déjeuner"
+    if 10.5 <= h < 15:
+        return "déjeuner"
+    if 15 <= h < 17.5:
+        return "goûter"
+    return "dîner"
+
+
+MEAL_WHEN = {"petit-déjeuner": "ce matin", "déjeuner": "ce midi", "goûter": "le goûter", "dîner": "ce soir"}
+
+
 def eat_prompt(now: datetime.datetime, spontaneous: bool = False) -> str:
+    meal = meal_now(now)
+    target = (f"Le repas concerné est le {meal} ({MEAL_WHEN[meal]}), celui que je vais manger maintenant : ne propose "
+              f"que pour ce repas, jamais pour un repas suivant.\n")
     if spontaneous:   # envoyé par le système juste avant un repas, sans demande de l'athlète
         intro = (
             f"[Suggestion automatique avant le repas] Il est {FR_DAYS[now.weekday()]} {now:%d/%m %H:%M}, je vais bientôt "
             "manger. Si d'après ma mémoire ou l'agenda je ne mange pas chez moi à ce repas (jour de bureau le midi, "
             f"restaurant, déplacement…), réponds uniquement « {NO_SUGGESTION} » et rien d'autre. Sinon, propose-moi "
             "directement quoi manger, sans me poser de question d'abord, en commençant par une courte phrase naturelle "
-            "(« Pour ce midi, je te propose : »).\n"
-        )
+            f"(« Pour {MEAL_WHEN[meal]}, je te propose : »).\n"
+        ) + target
     else:
-        intro = f"Que dois-je manger maintenant ? Il est {FR_DAYS[now.weekday()]} {now:%d/%m %H:%M}.\n"
+        intro = f"Que dois-je manger maintenant ? Il est {FR_DAYS[now.weekday()]} {now:%d/%m %H:%M}.\n" + target
     return (
         intro +
         "Déduis-le de mon stock (contexte), de l'heure (petit-déjeuner, déjeuner, collation, dîner), de mon entraînement "
@@ -106,9 +124,10 @@ def eat_prompt(now: datetime.datetime, spontaneous: bool = False) -> str:
            "arrête-toi là. Sinon, ") +
         "propose-moi exactement 3 plats, un par envie, et laisse-moi choisir (ne dis jamais lequel est le meilleur, "
         "sauf si je te le demande) :\n"
-        "- ⚡ express : prêt en 15 min max, zéro prise de tête (une boîte prête du stock passe en premier ici) ;\n"
-        "- 😌 chill : simple et réconfortant, 20 à 40 min tranquille ;\n"
-        "- 🤤 gourmand : le plat plaisir, un peu plus d'effort.\n"
+        "- express : prêt en 15 min max, zéro prise de tête (une boîte prête du stock passe en premier ici) ;\n"
+        "- chill : simple et réconfortant, 20 à 40 min tranquille ;\n"
+        "- gourmand : le plat plaisir, un peu plus d'effort.\n"
+        "Donne-les dans cet ordre, sans écrire le nom de l'envie ni d'émoji d'envie devant.\n"
         "Si le plat découverte de la semaine (contexte) n'est pas encore goûté, il peut être l'une des 3 options. "
         "Varie par rapport à ce qui revient souvent (contexte : variété des repas). "
         "Pense efficacité : un plat qui se cuisine en plus grande quantité pour remplir mes boîtes libres (contexte) est "
@@ -117,7 +136,7 @@ def eat_prompt(now: datetime.datetime, spontaneous: bool = False) -> str:
            "Les magasins sont fermés : uniquement des plats faisables avec ce qu'il y a en stock, rien à acheter. ") +
         "Mets un maximum d'émojis pour que je me projette : chaque plat commence par un émoji qui le symbolise, et ses "
         "ingrédients principaux ont le leur. Format : une courte phrase d'intro, puis une ligne par plat, rien d'autre :\n"
-        "⚡ 🌮 *Le plat* · 🥚🥔🧀 · ⏱️ temps (· 🛒 ce qu'il faut acheter, seulement s'il manque quelque chose)\n"
+        "🌮 *Le plat* · 🥚🥔🧀 · ⏱️ temps (· 🛒 ce qu'il faut acheter, seulement s'il manque quelque chose)\n"
         "Pour chaque plat, cherche d'abord une recette de base avec search_recipe (le nom du plat seulement) : si elle "
         "colle, simplifie-la et adapte-la à mon stock, et finis la recette par « 📖 » + son lien ; garde-la bien simple. "
         "Pas de recette dans ton message : pour chaque plat, appelle propose_meal avec `mood`, `recipe` (ingrédients avec "

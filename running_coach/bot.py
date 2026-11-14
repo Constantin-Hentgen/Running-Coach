@@ -132,17 +132,19 @@ def meal_rows(meals: list[tuple[int, str]]) -> list[list[InlineKeyboardButton]]:
     ingrédients du stock, sans IA."""
     def icon(mid) -> str:
         item = store.proposal(mid) or {}
-        return MOOD_ICON.get(item.get("mood")) or ("🍽️" if has_recipe(mid) else "✅")
+        if item.get("mood"):   # /eat : le plat porte déjà son émoji, pas d'émoji d'envie devant
+            return ""
+        return "🍽️ " if has_recipe(mid) else "✅ "
 
     def order(meal) -> int:
         mood = (store.proposal(meal[0]) or {}).get("mood")
         return list(MOOD_ICON).index(mood) if mood in MOOD_ICON else len(MOOD_ICON)
 
-    return [[InlineKeyboardButton(f"{icon(mid)} {title}"[:60], callback_data=f"m:{mid}")]
+    return [[InlineKeyboardButton(f"{icon(mid)}{title}"[:60], callback_data=f"m:{mid}")]
             for mid, title in sorted(meals, key=order)]
 
 
-MOOD_ICON = {"express": "⚡", "chill": "😌", "gourmand": "🤤"}   # /eat : un plat par envie, dans cet ordre
+MOOD_ICON = {"express": "⚡", "chill": "😌", "gourmand": "🤤"}   # /eat : ordre des plats (rapide → gourmand) ; icônes non affichées
 EAT_REPEAT_HOURS = 2   # /eat redemandé avant : on remontre les mêmes plats plutôt que d'en inventer d'autres
 
 

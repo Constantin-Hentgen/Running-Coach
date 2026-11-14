@@ -1226,10 +1226,10 @@ def test_eat_three_moods_on_buttons_and_reshown_instead_of_rechosen(tmp_path, mo
 
     b._authorized = authorized
     asyncio.run(b.on_eat(update, None))
-    assert "⚡ express" in asked[-1] and "😌 chill" in asked[-1] and "🤤 gourmand" in asked[-1]
+    assert "- express" in asked[-1] and "- chill" in asked[-1] and "- gourmand" in asked[-1]
     assert "émoji" in asked[-1] and "meilleur" in asked[-1]                    # never picks for me
     labels = [l for l, _ in _buttons(b.sent[-1][1])]
-    assert labels == ["⚡ 🥪 Wrap thon", "😌 🍲 Lentilles", "🤤 🍝 Pâtes crème"]   # mood order, dish emoji kept
+    assert labels == ["🥪 Wrap thon", "🍲 Lentilles", "🍝 Pâtes crème"]   # mood order, dish emoji only
 
     asyncio.run(b.on_eat(update, None))                                       # /eat again: same options, no AI call
     assert len(asked) == 1 and b.sent[-1][0].startswith("Tes options de tout à l'heure")
@@ -1428,3 +1428,15 @@ def test_chosen_dish_with_boxes_counts_as_eaten_and_meal_question_waits_an_hour(
 
     asyncio.run(run())
     assert len(b.sent) == n and waits and waits[0][0] == 1 and 3500 <= waits[0][1] <= 3600   # postponed ~1 h
+
+
+
+def test_meal_suggestion_is_about_the_meal_coming_now():
+    from running_coach import commands
+    tz = bot_module.TZ
+    at = lambda h, m: datetime.datetime(2026, 11, 14, h, m, tzinfo=tz)
+    assert [commands.meal_now(at(*t)) for t in ((7, 0), (11, 30), (16, 0), (18, 30))] == [
+        "petit-déjeuner", "déjeuner", "goûter", "dîner"]
+    morning = commands.eat_prompt(at(7, 0), spontaneous=True)
+    assert "Le repas concerné est le petit-déjeuner (ce matin)" in morning and "Pour ce matin" in morning
+    assert "jamais pour un repas suivant" in morning and "ce midi" not in morning
