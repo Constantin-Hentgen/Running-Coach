@@ -631,8 +631,9 @@ class Store:
         return bool(s["start"]) and s["start"] == s["last"]
 
     def gif_available(self) -> bool:
-        s = self.state["interaction"]
-        return not s["gif_at"] or not s["start"] or s["gif_at"] < s["start"]
+        s = self.state["interaction"]   # vraies dates : le GIF est daté en UTC, la session en heure locale
+        return (not s["gif_at"] or not s["start"]
+                or datetime.datetime.fromisoformat(s["gif_at"]) < datetime.datetime.fromisoformat(s["start"]))
 
     def mark_gif(self, now: datetime.datetime) -> None:
         with self._lock:

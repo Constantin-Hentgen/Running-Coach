@@ -1139,7 +1139,7 @@ def test_gif_only_to_open_or_close_once_per_session(tmp_path, monkeypatch):
         return Res()
 
     monkeypatch.setattr(tools.requests, "get", fake_get)
-    t0 = datetime.datetime(2026, 11, 13, 18, 0, tzinfo=bot_module.TZ)
+    t0 = datetime.datetime.now(bot_module.TZ) - datetime.timedelta(minutes=30)   # le GIF est daté de l'heure réelle
     store.touch_interaction(t0)
     assert store.session_opening()
     store.touch_interaction(t0 + datetime.timedelta(minutes=5))             # mid-conversation
