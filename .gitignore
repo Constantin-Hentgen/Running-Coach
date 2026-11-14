@@ -10,4 +10,5 @@ venv/
 env/
 .venv/
 .pytest_cache/
-data/
+# données du coach en local (mémoire, historique) ; running_coach/data/ est versionné
+/data/
