@@ -7,7 +7,7 @@ import requests
 from dataclasses import dataclass, field
 
 from . import calendar_store as cs
-from . import recipes
+from . import nutrition, recipes
 from .coaching import box_count
 from .config import settings
 from .formatting import md_escape
@@ -176,6 +176,15 @@ def _uses(args: dict) -> list[dict]:
 MEAL_MOODS = ("express", "chill", "gourmand")
 
 
+def meal_nutrients(args: dict) -> tuple[dict, list[str]]:
+    """Nutriments d'un repas : calculés depuis Ciqual si les aliments sont donnés (items), sinon les estimations."""
+    if args.get("items"):
+        computed = nutrition.compute(args["items"])
+        if computed["items"]:
+            return {**computed["totals"], "items": computed["items"]}, computed["unmatched"]
+    return {k: args.get(k) for k in ("kcal", "protein_g", "carbs_g")}, []
+
+
 def tool_propose_meal(args: dict, ledger: Ledger) -> dict:
     title = " ".join((args.get("title") or "").split())[:80]
     if not title:
@@ -191,22 +200,29 @@ def tool_propose_meal(args: dict, ledger: Ledger) -> dict:
     mood = args.get("mood") if args.get("mood") in MEAL_MOODS else None
     if args.get("discovery"):
         store.add_discovery(title, datetime.datetime.now(cs.TZ).date())
-    pid = store.add_proposal(title, kind="meal", uses=uses, makes=makes, recipe=recipe, mood=mood,
-                             macros={k: args.get(k) for k in ("kcal", "protein_g", "carbs_g")})
+    macros, unmatched = meal_nutrients(args)
+    pid = store.add_proposal(title, kind="meal", uses=uses, makes=makes, recipe=recipe, mood=mood, macros=macros)
     ledger.record("meal", title, True, detail=str(pid))
     note = ("Un bouton « choisir » est affiché sous ta réponse : la recette sera envoyée quand l'athlète choisira ce plat, "
             "ne la recopie pas dans ta réponse." if recipe else "Un bouton « mangé / cuisiné » est affiché sous ta réponse.")
-    return {"ok": True, "meal_id": pid, "note": note + " Ne mets pas le stock à jour toi-même."}
+    result = {"ok": True, "meal_id": pid, "note": note + " Ne mets pas le stock à jour toi-même.",
+              "portion": {k: macros.get(k) for k in nutrition.NUTRIENTS}}
+    if unmatched:
+        result["unmatched"] = unmatched
+    return result
 
 
 def tool_log_meal(args: dict, ledger: Ledger) -> dict:
     at = cs.parse_dt(args["time"]) if args.get("time") else cs.now_utc()
     if at > cs.now_utc() + datetime.timedelta(minutes=5):
         raise ValueError("repas dans le futur : n'enregistre que ce qui a été mangé")
-    item = store.log_meal(args.get("description", ""), at, kcal=args.get("kcal"),
-                          protein_g=args.get("protein_g"), carbs_g=args.get("carbs_g"))
+    macros, unmatched = meal_nutrients(args)
+    item = store.log_meal(args.get("description", ""), at, **macros)
     ledger.record("meal_log", f"{item['time']} {item['text']}", True)
-    result = {"ok": True, "logged": item}
+    result = {"ok": True, "logged": {k: v for k, v in item.items() if k != "items"},
+              "items": [f"{i['grams']} g {i['ciqual']}" for i in item["items"]]}
+    if unmatched:
+        result["unmatched"] = f"pas trouvés dans Ciqual : {', '.join(unmatched)} ; reformule (find_food) et corrige"
     if uses := _uses(args):
         r = store.update_pantry(remove=uses)
         changes = [f"−{x}" for x in r["removed"]] + r["updated"]
@@ -574,7 +590,16 @@ MEAL_TOOL = {
             "discovery": {"type": "boolean", "description": "true seulement pour le plat découverte de la semaine"},
             "mood": {"type": "string", "enum": ["express", "chill", "gourmand"],
                      "description": "/eat : l'envie à laquelle ce plat répond (un plat par envie)"},
-            "kcal": {"type": "integer", "description": "estimation pour une portion"},
+            "items": {"type": "array", "description": "les aliments de la portion mangée, décomposés en aliments simples (un "
+                      "plat composé = ses ingrédients), chacun avec son poids estimé ; les nutriments sont calculés par le "
+                      "système depuis la table Ciqual. `code` = le code Ciqual choisi via find_food (sinon le système prend "
+                      "l'aliment le plus proche de `food`).",
+                      "items": {"type": "object", "properties": {
+                          "food": {"type": "string", "description": "à la manière de Ciqual, ex: « pâtes sèches cuites », « thon au naturel », « emmental râpé »"},
+                          "grams": {"type": "number"},
+                          "code": {"type": "string"}},
+                          "required": ["food", "grams"]}},
+            "kcal": {"type": "integer", "description": "seulement si items impossible : estimation pour une portion"},
             "protein_g": {"type": "integer"},
             "carbs_g": {"type": "integer"},
             "uses": {"type": "array", "items": {"type": "object", "properties": {
@@ -590,16 +615,28 @@ LOG_MEAL_TOOL = {
     "name": "log_meal",
     "description": (
         "Note dans le journal alimentaire un repas ou une collation que l'athlète DIT avoir mangé (réponse à « qu'as-tu "
-        "mangé ? » ou spontanément), un par repas. `uses` retire du stock ce qu'il a consommé (noms exacts du stock, "
-        "qty_left s'il en reste) : pas besoin d'update_stock en plus. Estime kcal, protéines et glucides (portions "
-        "habituelles si non précisées). Ne pas utiliser pour un plat seulement proposé (propose_meal)."
+        "mangé ? » ou spontanément), un par repas, à l'heure où il l'a mangé. Décompose-le en aliments simples avec "
+        "leur poids estimé (`items`, portions habituelles si non précisées : assiette de pâtes cuites ~250 g, riz cuit "
+        "~200 g, œuf ~55 g, tranche de pain ~30 g, yaourt 125 g, une boîte = la portion de sa recette) : le système "
+        "calcule les nutriments depuis la table Ciqual. `uses` retire du stock ce qu'il a consommé (noms exacts du "
+        "stock, qty_left s'il en reste) : pas besoin d'update_stock en plus. Ne pas utiliser pour un plat seulement "
+        "proposé (propose_meal)."
     ),
     "input_schema": {
         "type": "object",
         "properties": {
             "description": {"type": "string", "description": "ex: « Curry de poulet + riz (1 boîte), yaourt »"},
             "time": {"type": "string", "description": "heure du repas (pas de ta réponse), ISO, ex: 2026-11-11T12:30:00"},
-            "kcal": {"type": "integer"},
+            "items": {"type": "array", "description": "les aliments de la portion mangée, décomposés en aliments simples (un "
+                      "plat composé = ses ingrédients), chacun avec son poids estimé ; les nutriments sont calculés par le "
+                      "système depuis la table Ciqual. `code` = le code Ciqual choisi via find_food (sinon le système prend "
+                      "l'aliment le plus proche de `food`).",
+                      "items": {"type": "object", "properties": {
+                          "food": {"type": "string", "description": "à la manière de Ciqual, ex: « pâtes sèches cuites », « thon au naturel », « emmental râpé »"},
+                          "grams": {"type": "number"},
+                          "code": {"type": "string"}},
+                          "required": ["food", "grams"]}},
+            "kcal": {"type": "integer", "description": "seulement si items impossible"},
             "protein_g": {"type": "integer"},
             "carbs_g": {"type": "integer"},
             "uses": {"type": "array", "items": {"type": "object", "properties": {
@@ -629,6 +666,53 @@ GIF_TOOL = {
         "required": ["query", "moment"],
     },
 }
+
+FIND_FOOD_TOOL = {
+    "name": "find_food",
+    "description": (
+        "Cherche des aliments dans la table de composition Ciqual (ANSES) : pour chaque description, les aliments les "
+        "plus proches avec leur code et leurs valeurs pour 100 g. À utiliser avant log_meal / propose_meal quand "
+        "l'aliment n'est pas évident, puis passer le `code` choisi dans items."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {"queries": {"type": "array", "items": {"type": "string"},
+                                   "description": "ex: [« blanc de poulet cuit », « fromage râpé »]"}},
+        "required": ["queries"],
+    },
+}
+
+
+def tool_find_food(args: dict, ledger: Ledger) -> dict:
+    out = {}
+    for q in (args.get("queries") or [])[:12]:
+        out[q] = [{"code": f["code"], "name": f["name"], **{k: f[k] for k in ("kcal", "protein_g", "carbs_g", "fat_g")}}
+                  for f in nutrition.search(q, 6)]
+    return {"ok": True, "per_100g": out}
+
+
+PROFILE_TOOL = {
+    "name": "set_profile",
+    "description": "Enregistre le profil de l'athlète pour le bilan énergétique (seulement ce qu'il a dit) : poids, "
+                   "taille, année de naissance, sexe.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "weight_kg": {"type": "number"},
+            "height_cm": {"type": "number"},
+            "birth_year": {"type": "integer"},
+            "sex": {"type": "string", "enum": ["homme", "femme"]},
+        },
+    },
+}
+
+
+def tool_set_profile(args: dict, ledger: Ledger) -> dict:
+    values = {k: args.get(k) for k in ("weight_kg", "height_cm", "birth_year", "sex")}
+    profile = store.update_profile(**values)
+    ledger.record("profile", ", ".join(f"{k}={v}" for k, v in values.items() if v not in (None, "")), True)
+    return {"ok": True, "profile": profile}
+
 
 RECIPE_TOOL = {
     "name": "search_recipe",
@@ -687,7 +771,7 @@ def tool_send_gif(args: dict, ledger: Ledger) -> dict:
 
 
 _COMMON = [*MEMORY_TOOLS, *GOAL_TOOLS, PROPOSE_TOOL, *SHOPPING_TOOLS, EDIT_SHOPPING_TOOL, STOCK_TOOL, MEAL_TOOL, LOG_MEAL_TOOL,
-           RECIPE_TOOL,
+           RECIPE_TOOL, FIND_FOOD_TOOL, PROFILE_TOOL,
            *([GIF_TOOL] if settings.giphy_api_key else [])]
 ALL_TOOLS = [LIST_TOOL, *WRITE_TOOLS, *_COMMON]
 READ_ONLY_TOOLS = [LIST_TOOL, *_COMMON]
@@ -709,6 +793,8 @@ _IMPL = {
     "log_meal": tool_log_meal,
     "send_gif": tool_send_gif,
     "search_recipe": tool_search_recipe,
+    "find_food": tool_find_food,
+    "set_profile": tool_set_profile,
 }
 
 

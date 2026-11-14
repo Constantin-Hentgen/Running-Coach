@@ -179,9 +179,9 @@ def has_meal_between(meals: list[dict], day: datetime.date, start: datetime.time
     return any(m["date"] == d and lo < m["time"] <= hi for m in meals)
 
 
-def _macros(kcal, protein, carbs) -> str:
+def _macros(kcal, protein, carbs, fat=None) -> str:
     parts = [f"~{kcal} kcal" if kcal is not None else "", f"P {protein} g" if protein is not None else "",
-             f"G {carbs} g" if carbs is not None else ""]
+             f"G {carbs} g" if carbs is not None else "", f"L {fat} g" if fat is not None else ""]
     return ", ".join(p for p in parts if p)
 
 
@@ -198,7 +198,7 @@ def meals_context(meals: list[dict], today: datetime.date) -> str:
             continue
         lines.append(f"{label} ({_day(day)}) :")
         for m in of_day:
-            macros = _macros(m.get("kcal"), m.get("protein_g"), m.get("carbs_g"))
+            macros = _macros(m.get("kcal"), m.get("protein_g"), m.get("carbs_g"), m.get("fat_g"))
             lines.append(f"- {m['time']} {m['text']}" + (f" ({macros})" if macros else ""))
         totals = [sum(m.get(k) or 0 for m in of_day) if any(m.get(k) is not None for m in of_day) else None
                   for k in ("kcal", "protein_g", "carbs_g")]

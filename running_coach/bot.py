@@ -513,6 +513,13 @@ class CoachBot:
     async def on_goals(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await self._command(update, lambda: commands.format_goals_reply(store.goals, datetime.datetime.now(TZ).date()))
 
+    async def on_nutrition(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        def build() -> str:
+            today = datetime.datetime.now(TZ).date()
+            runs = dreeve.get_all_runs() if settings.dreeve_enabled else []
+            return commands.format_nutrition(store.meals_since(today - datetime.timedelta(days=8)), runs, store.profile, today)
+        await self._command(update, build)
+
     async def on_agenda(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         days = commands.parse_days(context.args or [])
 
@@ -1002,7 +1009,7 @@ def build_bot() -> CoachBot:
     bot = CoachBot(app)
     handlers = {
         "plan": bot.on_agenda, "load": bot.on_form, "runs": bot.on_last_runs, "weather": bot.on_weather,
-        "goals": bot.on_goals, "memory": bot.on_memory, "list": bot.on_list, "recipes": bot.on_recipes, "eat": bot.on_eat, "stock": bot.on_stock, "meme": bot.on_meme, "debrief": bot.on_debrief, "review": bot.on_review,
+        "goals": bot.on_goals, "memory": bot.on_memory, "list": bot.on_list, "recipes": bot.on_recipes, "eat": bot.on_eat, "stock": bot.on_stock, "meme": bot.on_meme, "nutrition": bot.on_nutrition, "debrief": bot.on_debrief, "review": bot.on_review,
         "shopping": bot.on_shopping, "briefing": bot.on_briefing, "help": bot.on_help,
     }
     for name, aliases, _ in commands.COMMANDS:

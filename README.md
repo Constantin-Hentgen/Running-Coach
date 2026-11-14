@@ -220,6 +220,7 @@ Just talk to it (in French), for example:
 | `/review` | AI review of the current week: planned vs done, form, goals, next week |
 | `/shopping` | AI shopping list for the next 7 days (`/shopping 3` for 3, max 14), built from your sport and health goals, food preferences in memory, and the sessions planned over that period. Planned around 4–6 easy meal-prep recipes. Arrives as a Telegram checklist to tick at the store, headed by **how many days and which meals it covers** and an **estimated cost range** in euros; also saved as an event in your shopping calendar (`RADICALE_SHOPPING_URL`) at your shopping time, e.g. *« mets-la à 15h »* |
 | `/list` | Shows the current shopping checklist again (no AI) |
+| `/nutrition` | What you ate today (meal by meal) and over 7 days: calories, protein, carbs, fat, fiber, and today's needs vs intake. Computed from the Ciqual table, no AI call |
 | `/meme` | A GIF or meme that sums up your training day (today's runs, calendar, check-ins, meals, weather), with one funny line. Needs `GIPHY_API_KEY` |
 | `/eat` | What to eat **right now** (Haiku): deduced from your kitchen stock, the time of day and your training (session just done or coming up), goals and memory. Gives the dish and why, total time, what comes from your stock and what to buy, quantities and short steps, and how many containers to make for later. Asks one or two questions first only when it really needs to. Also sent on its own just before meals (`EAT_SUGGEST_TIMES`) |
 | `/stock` | What you have in your kitchen (no AI), with how long ago each item was bought and, for fresh items, how long it keeps |
@@ -240,7 +241,7 @@ Just talk to it (in French), for example:
 Most of it needs no typing:
 - **Eaten / cooked buttons**: each dish `/eat` suggests and each recipe from `/recipes` comes with a button (`✅ Bowl saumon riz`). Tap it once you've eaten or cooked it and its ingredients leave the stock (or are reduced to what's left), with no AI call.
 - **Keep-by dates**: the coach gives each fresh item a shelf life when it goes on the list or into the stock (fish 2 days, vegetables about a week, dry goods none). Every day at `PANTRY_CHECK_TIME`, items that reached it come in one message with **Encore là / Fini** buttons per item; « encore là » pushes the date back by half the shelf life. Items you don't answer about within 3 days leave the stock on their own.
-- **Food log** 🍽️: tapping a dish's button logs it as eaten (a `/recipes` « cuisiné » button instead puts the boxes in the stock). When no meal is logged around a meal time (`MEAL_CHECK_TIMES`), the bot asks « Ce midi, tu as mangé quoi ? » with one button per likely dish (your ready meal boxes, oldest first, then dishes it suggested in the last 36 h) and **Sauté**. One tap logs the meal at the meal time and takes it out of the stock, with a one-line confirmation. Or answer in text or voice: the coach logs the meal with rough kcal / protein / carbs estimates, takes what you used out of the stock, and says in a few lines whether the day's food fits your training (session done or coming, load, goals) and what to eat next. You can also just tell it what you ate at any time. Today's and yesterday's meals are in the coach's context, so `/eat` and the briefing take them into account.
+- **Food log** 🍽️: tapping a dish's button logs it as eaten (a `/recipes` « cuisiné » button instead puts the boxes in the stock). When no meal is logged around a meal time (`MEAL_CHECK_TIMES`), the bot asks « Ce midi, tu as mangé quoi ? » with one button per likely dish (your ready meal boxes, oldest first, then dishes it suggested in the last 36 h) and **Sauté**. One tap logs the meal at the meal time and takes it out of the stock, with a one-line confirmation. Or answer in text or voice: the coach breaks the meal down into simple foods with estimated weights and the code computes its nutrients (kcal, protein, carbs, fat, sugars, fiber, salt) from the **Ciqual** food composition table, takes what you used out of the stock, and says in a few lines whether the day's food fits your training (session done or coming, load, goals) and what to eat next. You can also just tell it what you ate at any time. Today's and yesterday's meals are in the coach's context, so `/eat` and the briefing take them into account.
 
 **Proposals**: when the coach suggests a calendar change without making it (debrief, weekly review, weather alert), the message ends with the proposal and buttons: ✅ applies it, ✏️ lets you say what to change, ❌ keeps the plan as is. Each button works once.
 
@@ -267,6 +268,12 @@ To correct the memory: *« oublie le #3 »* (forget #3), or simply say what chan
   Right after, the **check-in** asks for your perceived effort (1–10) then your legs (🟢 fresh, 🟡 normal, 🟠 heavy, 🔴 pain), one tap each. The coach sees your last 14 days of check-ins (plus effort × minutes as a perceived load) in every reply and weighs them like the Dreeve data; « pain » triggers a follow-up question.
 
 ---
+
+## 🥗 Nutrition tracking
+
+Meals are stored as structured data: time, meal (breakfast, lunch, snack, dinner), each food with its estimated weight matched to the **ANSES Ciqual 2020** food composition table (2,298 foods, bundled as `running_coach/data/ciqual_2020.csv`, rebuilt with `scripts/build_ciqual.py`), and the computed nutrients. The model only estimates portions; the numbers come from the table.
+
+With your profile (weight, height, birth year, sex — Bob asks once), the coach also knows your **energy balance**: intake vs expenditure, estimated as resting metabolism (Mifflin-St Jeor) × 1.4 for daily life plus the calories of your Dreeve runs. Today so far, yesterday and the 7-day average are in Bob's context, and `/nutrition` shows them.
 
 ## 🧠 Memory
 
@@ -362,3 +369,5 @@ Tests need no keys and no network: Claude, Dreeve and MCP calls are mocked. They
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+Nutrition data: Anses. 2020. Table de composition nutritionnelle des aliments Ciqual, [ciqual.anses.fr](https://ciqual.anses.fr) — [Licence Ouverte / Open Licence](https://www.etalab.gouv.fr/licence-ouverte-open-licence) (extract: energy, protein, carbohydrates, fat, sugars, fiber and salt per 100 g).

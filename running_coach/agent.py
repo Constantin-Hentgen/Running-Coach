@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 import anthropic
 
 from . import calendar_store as cs
-from . import coaching, dreeve, dreeve_mcp, weather
+from . import coaching, dreeve, dreeve_mcp, nutrition, weather
 from .config import FR_DAYS_LONG, TZ, TZ_LABEL, UTC, settings
 from .memory import store
 from .tools import ALL_TOOLS, GIF_ON_DEMAND, READ_ONLY_TOOLS, Ledger, build_report, run_tool
@@ -97,6 +97,8 @@ DONNÉES DREEVE (lecture seule) :
 - Les métriques de performance (records, prédictions de temps, efficacité, tendances…) viennent des outils `dreeve_*` quand ils les fournissent : ne les recalcule pas toi-même et ne les invente pas.
 
 NUTRITION :
+- Suivi précis : chaque repas dont l'athlète parle est noté avec `log_meal`, à la bonne heure, décomposé en aliments simples avec leur poids estimé (`items`) ; en cas de doute sur un aliment, `find_food` puis son code. Les nutriments et le bilan énergétique (apports vs dépense : métabolisme × activité + runs Dreeve) sont calculés par le système (contexte « Bilan nutritionnel ») : ne les recalcule pas, appuie-toi dessus.
+- Si le profil est incomplet, demande poids, taille, année de naissance et sexe une seule fois, simplement, quand ça vient naturellement, puis `set_profile`.
 - Tu conseilles aussi l'alimentation, au service des objectifs sportifs ET de santé de la mémoire, en tenant compte des séances prévues (jours durs ou longs : plus de glucides et de récupération ; repos : plus léger).
 - Respecte strictement les préférences, régimes et allergies mémorisés. Pas d'avis médical : pour une pathologie, renvoie vers un professionnel.
 - Une liste de courses (alimentaires) ne va JAMAIS dans l'agenda d'entraînement : pas de `create_calendar_event` pour des courses, un repas ou une commande. Pour l'enregistrer (checklist à cocher dans Telegram, et événement dans l'agenda courses dédié s'il est configuré), utilise uniquement `save_shopping_list`.
@@ -258,12 +260,15 @@ def _system_blocks() -> list[dict]:
 
 async def _gather_context() -> str:
     today = datetime.datetime.now(TZ).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(UTC)
-    forecast, cal_result, dreeve_text = await asyncio.gather(
+    forecast, cal_result, dreeve_text, all_runs = await asyncio.gather(
         asyncio.to_thread(weather.get_forecast_text),
         asyncio.to_thread(cs.list_events, today, today + datetime.timedelta(days=settings.context_days_ahead)),
         asyncio.to_thread(dreeve.get_summary),
+        asyncio.to_thread(dreeve.get_all_runs) if settings.dreeve_enabled else asyncio.sleep(0, []),
         return_exceptions=True,
     )
+    if isinstance(all_runs, Exception):
+        all_runs = []
     if isinstance(cal_result, Exception):
         logger.error(f"Lecture Radicale impossible : {cal_result}")
         agenda = f"ERREUR DE LECTURE RADICALE : {cal_result}. N'effectue AUCUNE modification et préviens l'utilisateur."
@@ -285,6 +290,8 @@ async def _gather_context() -> str:
         f"- Stock en cuisine :\n{coaching.pantry_context(store.pantry, now.date())}\n"
         f"- Boîtes repas (tups) : {coaching.boxes_context(store.pantry, settings.meal_boxes)}\n"
         f"- Repas notés :\n{coaching.meals_context(store.meals_since(now.date() - datetime.timedelta(days=1)), now.date())}\n"
+        f"- Bilan nutritionnel (calculé par le système, table Ciqual) :\n"
+        f"{nutrition.energy_context(store.meals_since(now.date() - datetime.timedelta(days=8)), all_runs, store.profile, now.date())}\n"
         f"- Variété des repas : {coaching.meal_variety(store.meals_since(now.date() - datetime.timedelta(days=coaching.VARIETY_DAYS)), now.date())}\n"
         f"- Plat découverte de la semaine : {coaching.discovery_context(store.discoveries, store.meals_since(now.date() - datetime.timedelta(days=8)), now.date())}\n"
         f"- Liste de courses en cours {coaching.shopping_context(store.shopping_list)}\n"

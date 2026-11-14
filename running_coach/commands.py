@@ -29,6 +29,7 @@ COMMANDS = [
     ("recipes", [], "Recettes en boîtes pour ta liste de courses"),
     ("eat", [], "Quoi manger maintenant (stock, heure, entraînement)"),
     ("stock", [], "Ce que tu as en cuisine"),
+    ("nutrition", ["nutri"], "Ce que tu as mangé : calories, macros, bilan du jour et de la semaine"),
     ("meme", [], "Un mème qui résume ta journée d'entraînement"),
     ("briefing", [], "Briefing IA complet et ajustement du programme"),
     ("help", ["start"], "Liste des commandes"),
@@ -57,6 +58,7 @@ HELP_TEXT = """🏃 *Salut, c'est __BOT_NAME__* 🤖
 /stock — ce que tu as en cuisine : les articles cochés sur ta liste y entrent, les plats que tu marques « mangé » ou « cuisiné » en sortent, et je te demande si les produits frais sont encore là quand ils arrivent à échéance
 /briefing — briefing complet, ajuste le programme dans l'agenda
 /meme — un mème qui résume ta journée d'entraînement 😂
+/nutrition — ce que tu as mangé aujourd'hui et cette semaine : calories, protéines, glucides, lipides, et si tu manges assez pour ce que tu dépenses (table Ciqual)
 
 /help — cette aide
 
@@ -75,6 +77,47 @@ def parse_days(args: list[str], default: int = AGENDA_DEFAULT_DAYS, maximum: int
 
 
 NO_SUGGESTION = "PAS_DE_SUGGESTION"
+
+
+def _n(x: float) -> str:
+    return f"{x:,.0f}".replace(",", " ")
+
+
+def format_nutrition(meals: list[dict], runs: list[dict], profile: dict, today: datetime.date) -> str:
+    """/nutrition : aujourd'hui, repas par repas, et les 7 derniers jours (calculé depuis Ciqual, sans IA)."""
+    from . import nutrition
+    t = nutrition.day_totals(meals, today)
+    lines = [f"🍽️ *Aujourd'hui* : {_n(t['kcal'])} kcal · 🥩 {t['protein_g']:.0f} g protéines · 🍚 {t['carbs_g']:.0f} g "
+             f"glucides · 🧈 {t['fat_g']:.0f} g lipides · 🥦 {t['fiber_g']:.0f} g fibres"]
+    needs, running = nutrition.day_needs(profile, runs, today)
+    if needs:
+        left = needs - t["kcal"]
+        lines.append(f"Besoins du jour ~{_n(needs)} kcal" + (f" (dont 🏃 {_n(running)})" if running else "")
+                     + (f" → encore ~{_n(left)} kcal à manger 💪" if left > 0 else " → c'est couvert 👌"))
+    else:
+        lines.append("_Dis-moi ton poids, ta taille, ton année de naissance et ton sexe pour que je calcule tes besoins._")
+    for m in [m for m in meals if m["date"] == today.isoformat()]:
+        kcal = f" · {_n(m['kcal'])} kcal" if m.get("kcal") is not None else ""
+        lines.append(f"- {m['time']} {md_escape(m['text'])}{kcal}")
+    days = [today - datetime.timedelta(days=i) for i in range(1, 8)]
+    logged = [(d, nutrition.day_totals(meals, d)) for d in days]
+    logged = [(d, x) for d, x in logged if x["meals"] >= 2]
+    if logged:
+        avg = {k: sum(x[k] for _, x in logged) / len(logged) for k in ("kcal", "protein_g", "carbs_g", "fat_g")}
+        line = f"\n📅 *7 derniers jours* ({len(logged)} j bien notés) : {_n(avg['kcal'])} kcal/j en moyenne"
+        week_needs = [nutrition.day_needs(profile, runs, d)[0] for d, _ in logged]
+        if all(week_needs):
+            gap = avg["kcal"] - sum(week_needs) / len(week_needs)
+            line += f", {'déficit' if gap < 0 else 'surplus'} de ~{_n(abs(gap))} kcal/j"
+        if profile.get("weight_kg"):
+            w = float(profile["weight_kg"])
+            lo, hi = nutrition.PROTEIN_G_PER_KG
+            line += f" · protéines {avg['protein_g'] / w:.1f} g/kg (repère {lo:g}–{hi:g})"
+        lines.append(line)
+    if not any(m["date"] == today.isoformat() for m in meals) and not logged:
+        lines.append("\nRien de noté pour l'instant : dis-moi ce que tu manges, je m'occupe du reste 😉")
+    lines.append("\n_Valeurs : table Ciqual (ANSES), estimations à partir des portions._")
+    return "\n".join(lines)
 
 
 def shops_open(now: datetime.datetime) -> bool:

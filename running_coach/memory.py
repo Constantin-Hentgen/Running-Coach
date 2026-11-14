@@ -107,7 +107,8 @@ class Store:
         state.setdefault("next_pantry_id", 1)
         # journal alimentaire : {id, date, time (HH:MM), text, kcal, protein_g, carbs_g, source}
         state.setdefault("meals", [])
-        state.setdefault("discoveries", [])   # plat nouveau de la semaine : [{title, date}] (jamais reproposé)
+        state.setdefault("discoveries", [])
+        state.setdefault("profile", {})       # poids, taille, année de naissance, sexe : bilan énergétique   # plat nouveau de la semaine : [{title, date}] (jamais reproposé)
         state.setdefault("next_meal_id", 1)
         state.setdefault("meal_checks", {})   # « date créneau » → asked | skipped | answered (question « qu'as-tu mangé ? »)
         for p in state["pantry"]:
@@ -547,8 +548,11 @@ class Store:
     # --- journal alimentaire ---------------------------------------------------------
 
     def log_meal(self, text: str, at: datetime.datetime, source: str = "conversation",
-                 kcal=None, protein_g=None, carbs_g=None) -> dict:
-        """Repas mangé (texte libre + estimations facultatives). Les entrées de plus de MEAL_LOG_DAYS jours sont purgées."""
+                 kcal=None, protein_g=None, carbs_g=None, fat_g=None, fiber_g=None, sugars_g=None, salt_g=None,
+                 items: list[dict] | None = None) -> dict:
+        """Repas mangé : texte, aliments pesés (items, nutriments Ciqual) et totaux. Les entrées de plus de MEAL_LOG_DAYS
+        jours sont purgées."""
+        from .nutrition import meal_of
         text = " ".join((text or "").split())[:200]
         if not text:
             raise ValueError("repas vide")
@@ -558,18 +562,35 @@ class Store:
                 return max(0, round(float(v))) if v not in (None, "") else None
             except (TypeError, ValueError):
                 return None
+
+        def decimal(v):
+            try:
+                return max(0.0, round(float(v), 1)) if v not in (None, "") else None
+            except (TypeError, ValueError):
+                return None
         at = at.astimezone(TZ)
         with self._lock:
             cutoff = (at.date() - datetime.timedelta(days=MEAL_LOG_DAYS)).isoformat()
             self.state["meals"] = [m for m in self.state["meals"] if m["date"] >= cutoff]
             item = {"id": self.state["next_meal_id"], "date": at.date().isoformat(), "time": f"{at:%H:%M}",
-                    "text": text, "kcal": number(kcal), "protein_g": number(protein_g), "carbs_g": number(carbs_g),
-                    "source": source}
+                    "slot": meal_of(at.time()), "text": text, "kcal": number(kcal), "protein_g": number(protein_g),
+                    "carbs_g": number(carbs_g), "fat_g": number(fat_g), "fiber_g": number(fiber_g),
+                    "sugars_g": number(sugars_g), "salt_g": decimal(salt_g), "items": items or [], "source": source}
             self.state["next_meal_id"] += 1
             self.state["meals"].append(item)
             self.state["meals"].sort(key=lambda m: (m["date"], m["time"]))
             self._save()
         return dict(item)
+
+    @property
+    def profile(self) -> dict:
+        return dict(self.state["profile"])
+
+    def update_profile(self, **values) -> dict:
+        with self._lock:
+            self.state["profile"].update({k: v for k, v in values.items() if v not in (None, "")})
+            self._save()
+            return dict(self.state["profile"])
 
     @property
     def discoveries(self) -> list[dict]:
