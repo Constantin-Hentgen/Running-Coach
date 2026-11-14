@@ -213,12 +213,25 @@ def tool_propose_meal(args: dict, ledger: Ledger) -> dict:
     return result
 
 
+def tool_remove_meal(args: dict, ledger: Ledger) -> dict:
+    item = store.remove_meal(int(args["id"]))
+    if item is None:
+        raise ValueError(f"aucun repas #{args['id']} dans le journal")
+    ledger.record("meal_log", f"retiré : {item['time']} {item['text']}", True)
+    return {"ok": True, "removed": {k: v for k, v in item.items() if k != "items"}}
+
+
 def tool_log_meal(args: dict, ledger: Ledger) -> dict:
     at = cs.parse_dt(args["time"]) if args.get("time") else cs.now_utc()
     if at > cs.now_utc() + datetime.timedelta(minutes=5):
         raise ValueError("repas dans le futur : n'enregistre que ce qui a été mangé")
+    again = bool(args.get("again"))
+    if not again and (dup := store.similar_meal(args.get("description", ""), at)):
+        raise ValueError(f"déjà noté : #{dup['id']} le {dup['date']} à {dup['time']} « {dup['text']} ». Rien n'a été "
+                         "ajouté. Redemander ou relire une recette n'est pas la manger ; seulement si l'athlète dit "
+                         "clairement l'avoir remangé, rappelle log_meal avec again=true.")
     macros, unmatched = meal_nutrients(args)
-    item = store.log_meal(args.get("description", ""), at, **macros)
+    item = store.log_meal(args.get("description", ""), at, **macros, repeat=again)
     ledger.record("meal_log", f"{item['time']} {item['text']}", True)
     result = {"ok": True, "logged": {k: v for k, v in item.items() if k != "items"},
               "items": [f"{i['grams']} g {i['ciqual']}" for i in item["items"]]}
@@ -614,6 +627,15 @@ MEAL_TOOL = {
     },
 }
 
+REMOVE_MEAL_TOOL = {
+    "name": "remove_meal",
+    "description": (
+        "Retire une entrée du journal alimentaire (n° # donné dans « Repas notés ») : un doublon, ou un repas noté par "
+        "erreur, une fois que l'athlète l'a confirmé. Ne remet rien au stock (update_stock si besoin)."
+    ),
+    "input_schema": {"type": "object", "properties": {"id": {"type": "integer"}}, "required": ["id"]},
+}
+
 LOG_MEAL_TOOL = {
     "name": "log_meal",
     "description": (
@@ -636,6 +658,8 @@ LOG_MEAL_TOOL = {
             "carbs_g": {"type": "integer"},
             "uses": {"type": "array", "items": {"type": "object", "properties": {
                 "name": {"type": "string"}, "qty_left": {"type": "string"}}, "required": ["name"]}},
+            "again": {"type": "boolean", "description": "true seulement si l'athlète dit avoir remangé un plat déjà noté "
+                                                       "(sinon le système refuse un doublon)"},
         },
         "required": ["description"],
     },
@@ -783,12 +807,12 @@ def tool_send_gif(args: dict, ledger: Ledger) -> dict:
     return {"ok": False, "error": f"aucun GIF trouvé pour « {query} » : continue sans"}
 
 
-_COMMON = [*MEMORY_TOOLS, *GOAL_TOOLS, PROPOSE_TOOL, *SHOPPING_TOOLS, EDIT_SHOPPING_TOOL, STOCK_TOOL, MEAL_TOOL, LOG_MEAL_TOOL,
+_COMMON = [*MEMORY_TOOLS, *GOAL_TOOLS, PROPOSE_TOOL, *SHOPPING_TOOLS, EDIT_SHOPPING_TOOL, STOCK_TOOL, MEAL_TOOL, LOG_MEAL_TOOL, REMOVE_MEAL_TOOL,
            RECIPE_TOOL, FIND_FOOD_TOOL, PROFILE_TOOL,
            *([GIF_TOOL] if settings.giphy_api_key else [])]
 ALL_TOOLS = [LIST_TOOL, *WRITE_TOOLS, *_COMMON]
 # pas d'effacement de mémoire ni d'objectifs dans les échanges sans écriture (débrief, /eat, suggestions…) ; ordre inchangé
-READ_ONLY_TOOLS = [LIST_TOOL, *(t for t in _COMMON if t["name"] not in ("forget", "remove_goal"))]
+READ_ONLY_TOOLS = [LIST_TOOL, *(t for t in _COMMON if t["name"] not in ("forget", "remove_goal", "remove_meal"))]
 
 _IMPL = {
     "list_calendar_events": tool_list,
@@ -805,6 +829,7 @@ _IMPL = {
     "edit_shopping_list": tool_edit_shopping_list,
     "propose_meal": tool_propose_meal,
     "log_meal": tool_log_meal,
+    "remove_meal": tool_remove_meal,
     "send_gif": tool_send_gif,
     "search_recipe": tool_search_recipe,
     "find_food": tool_find_food,

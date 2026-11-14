@@ -71,6 +71,8 @@ PRÉPARATION DES REPAS (BOÎTES) :
 JOURNAL ALIMENTAIRE :
 - Le contexte donne les repas notés aujourd'hui et hier (heure, contenu, estimations). Le système demande « qu'as-tu mangé ? » après un repas dont il n'a aucune trace.
 - Quand l'athlète dit ce qu'il a mangé (réponse à cette question ou spontanément), appelle `log_meal` pour chaque repas, à l'heure où il l'a mangé, avec tes estimations et `uses` pour ce qui sort du stock. Puis en 1 ou 2 lignes, l'essentiel seulement : est-ce adapté à son entraînement (séance du jour faite ou à venir, sortie longue ou fractionné demain, charge, objectifs santé) au vu du total de la journée, ce qui manque ou est en trop (glucides, protéines, hydratation…), et un conseil concret pour le repas suivant, tiré du stock si possible.
+- Ce qui est noté doit être exactement ce qu'il a mangé. Demander une recette, la relire, en reparler ou te la faire renvoyer n'est PAS la manger : pas de `log_meal` (ni de nouveau `propose_meal` pour un plat déjà choisi : redonne simplement la recette en texte). Un plat déjà noté (n° #) ne se note pas une deuxième fois ; seulement s'il dit clairement l'avoir remangé, `log_meal` avec `again: true`.
+- « À VÉRIFIER » (calculé par le système) liste les incohérences du journal : même plat noté deux fois, deux repas complets dans le même créneau, repas principal sans trace. Ne les prends pas pour argent comptant : lève le doute en UNE question courte quand ça vient naturellement (pas si tu l'as déjà posée dans l'historique), puis corrige : `remove_meal` pour un doublon, `log_meal` pour un repas oublié. Ne suggère jamais qu'il a sauté un repas : pour un repas sans trace, demande ce qu'il a mangé en proposant ses boîtes du stock. S'il dit lui-même ne pas avoir mangé, note « rien (<repas> sauté) » avec kcal 0.
 - Estimations approximatives : ne fais pas de comptabilité, repère les écarts nets (séance dure sans glucides, journée très en dessous des besoins, peu de protéines en récupération).
 
 RESSENTI APRÈS SÉANCE :
@@ -320,7 +322,7 @@ async def _gather_context() -> str:
         f"- Ressentis après séance (14 derniers jours) :\n{coaching.checkins_context(store.recent_checkins(14, now.date()))}\n"
         f"- Stock en cuisine :\n{coaching.pantry_context(store.pantry, now.date())}\n"
         f"- Boîtes repas (tups) : {coaching.boxes_context(store.pantry, settings.meal_boxes)}\n"
-        f"- Repas notés :\n{coaching.meals_context(store.meals_since(now.date() - datetime.timedelta(days=1)), now.date())}\n"
+        f"- Repas notés :\n{coaching.meals_context(store.meals_since(now.date() - datetime.timedelta(days=1)), now.date(), now)}\n"
         f"- Bilan nutritionnel (calculé par le système, table Ciqual) :\n"
         f"{nutrition.energy_context(store.meals_since(now.date() - datetime.timedelta(days=8)), all_runs, store.profile, now.date())}\n"
         f"- Variété des repas : {coaching.meal_variety(store.meals_since(now.date() - datetime.timedelta(days=coaching.VARIETY_DAYS)), now.date())}\n"

@@ -234,5 +234,5 @@ def test_nutrition_check_time_default(monkeypatch):
     from running_coach import config
     monkeypatch.delenv("NUTRITION_CHECK_TIME", raising=False)
     src = open(config.__file__, encoding="utf-8").read()
-    assert '"NUTRITION_CHECK_TIME", "22:30"' in src
-    assert config._briefing_time(config._str("NUTRITION_CHECK_TIME", "22:30"), "NUTRITION_CHECK_TIME") is not None
+    assert '"NUTRITION_CHECK_TIME", "22:00"' in src
+    assert config._briefing_time(config._str("NUTRITION_CHECK_TIME", "22:00"), "NUTRITION_CHECK_TIME") == (22, 0)
