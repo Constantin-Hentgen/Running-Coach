@@ -53,7 +53,8 @@ flowchart LR
 | Module | Role |
 |---|---|
 | `running_coach/app.py` | FastAPI app (`/health` only; `/docs`, `/redoc` and `/openapi.json` are disabled), starts the bot and the scheduler, connectivity checks |
-| `running_coach/bot.py` | Telegram handlers, commands, buttons, voice, briefing, weekly review, new-run detection, weather alerts |
+| `running_coach/bot.py` | The Telegram bot: conversation flow (message queue, voice, ask and deliver, auth, error handler), button dispatch, proposals, `build_bot` |
+| `running_coach/handlers/` | The bot's features, one mixin each: `ui.py` (sending, bubbles, keyboards), `meals.py` (/eat, meal questions and suggestions, dish of the week, nutrition check), `kitchen.py` (shopping list, /recipes, stock), `runs.py` (new runs, debriefs, check-ins), `jobs.py` (briefing, weekly review, weather alerts), `info.py` (instant commands, /routes, /meme) |
 | `running_coach/agent.py` | System prompt, real-time context, model routing, tool loop with prompt caching |
 | `running_coach/tools.py` | Tools exposed to the model (calendar, memory, goals, proposals, shopping list), action ledger, verified report |
 | `running_coach/coaching.py` | Logic computed by the code: goal countdowns, check-in summary, weekly planned vs done |

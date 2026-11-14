@@ -5,8 +5,15 @@ from types import SimpleNamespace as NS
 
 from running_coach import agent
 from running_coach import bot as bot_module
+from running_coach.handlers import info, jobs, kitchen, meals, runs, ui
 from running_coach import dreeve
 from running_coach.memory import Store
+
+
+def _patch_bot(monkeypatch, name, value):
+    """Le code du bot est réparti sur plusieurs modules : on patche `name` partout où il est lu."""
+    for module in (m for m in (bot_module, ui, meals, kitchen, runs, jobs, info) if hasattr(m, name)):
+        monkeypatch.setattr(module, name, value)
 
 
 def _run(i):
@@ -25,7 +32,7 @@ def test_new_runs_since():
 def _bot(tmp_path, monkeypatch, runs=(), asked=None, proposals=()):
     """Bot sans Telegram : les messages envoyés sont capturés dans b.sent [(texte, boutons)]."""
     store = Store(tmp_path / "state.json")
-    monkeypatch.setattr(bot_module, "store", store)
+    _patch_bot(monkeypatch, "store", store)
     monkeypatch.setattr(dreeve, "get_recent_runs", lambda count=5: list(runs))
     asked = asked if asked is not None else []
 
@@ -43,7 +50,7 @@ def _bot(tmp_path, monkeypatch, runs=(), asked=None, proposals=()):
     b._shopping_sync_lock, b._background = asyncio.Lock(), set()
     b._pending, b._pending_update, b._draining, b._last_message = [], None, False, 0.0
     monkeypatch.setattr(bot_module, "MESSAGE_DEBOUNCE_S", 0)
-    monkeypatch.setattr(bot_module, "BUBBLE_GAP_S", 0)
+    _patch_bot(monkeypatch, "BUBBLE_GAP_S", 0)
 
     async def fake_send(text, **kwargs):
         b.sent.append((text, kwargs.get("reply_markup")))
@@ -411,7 +418,7 @@ def test_only_the_weekly_review_uses_the_planning_model(tmp_path, monkeypatch):
     monkeypatch.setattr(bot_module.agent, "ask", fake_ask)
     monkeypatch.setattr(b, "_review_prompt", lambda: "Fais le bilan de ma semaine.")
     import dataclasses
-    monkeypatch.setattr(bot_module, "settings", dataclasses.replace(bot_module.settings, dreeve_url="http://d", dreeve_api_key="k"))
+    _patch_bot(monkeypatch, "settings", dataclasses.replace(bot_module.settings, dreeve_url="http://d", dreeve_api_key="k"))
 
     async def reply_text(text, **kwargs):
         pass
@@ -866,7 +873,7 @@ def _at(monkeypatch, hour, minute, day=11):
 def test_meal_question_only_without_any_trace_and_once(tmp_path, monkeypatch):
     b, store = _bot(tmp_path, monkeypatch)
     import dataclasses
-    monkeypatch.setattr(bot_module, "settings",
+    _patch_bot(monkeypatch, "settings",
                         dataclasses.replace(bot_module.settings, meal_check_times=[(10, 30), (14, 30), (21, 30)]))
     tz = bot_module.TZ
     store.log_meal("Porridge", datetime.datetime(2026, 11, 11, 7, 45, tzinfo=tz))
@@ -985,7 +992,7 @@ def test_debrief_that_hangs_falls_back_to_raw_stats(tmp_path, monkeypatch):
         await asyncio.sleep(3600)
 
     monkeypatch.setattr(bot_module.agent, "ask", hang)
-    monkeypatch.setattr(bot_module, "DEBRIEF_TIMEOUT_S", 0.01)
+    _patch_bot(monkeypatch, "DEBRIEF_TIMEOUT_S", 0.01)
     assert asyncio.run(b.check_new_activity()) is True
     assert "Run 1" in b.sent[0][0] and "/debrief" in b.sent[0][0]
     assert store.last_activity_id == 1 and bot_module.ACTIVITY_STATUS["result"] == "débrief envoyé : 1"
@@ -1009,7 +1016,7 @@ def test_proactive_messages_reach_send_message_with_bound_chat_id(tmp_path, monk
 def test_meal_question_guesses_boxes_and_suggested_dishes_one_tap(tmp_path, monkeypatch):
     import dataclasses
     b, store = _bot(tmp_path, monkeypatch)
-    monkeypatch.setattr(bot_module, "settings",
+    _patch_bot(monkeypatch, "settings",
                         dataclasses.replace(bot_module.settings, meal_check_times=[(10, 30), (14, 30), (21, 30)]))
     store.update_pantry(add=[{"name": "Chili", "qty": "2 boîtes", "boxes": True}, {"name": "Thon", "qty": "2 boîtes"}])
     suggested = store.add_proposal("Pâtes au thon", kind="meal", uses=[{"name": "Thon", "qty_left": "1 boîte"}],
@@ -1044,7 +1051,7 @@ def test_meal_question_guesses_boxes_and_suggested_dishes_one_tap(tmp_path, monk
 def test_last_box_is_said_and_skipping_closes_the_guesses(tmp_path, monkeypatch):
     import dataclasses
     b, store = _bot(tmp_path, monkeypatch)
-    monkeypatch.setattr(bot_module, "settings",
+    _patch_bot(monkeypatch, "settings",
                         dataclasses.replace(bot_module.settings, meal_check_times=[(14, 30), (21, 30)]))
     store.update_pantry(add=[{"name": "Curry", "qty": "1 boîte", "boxes": True}])
     _at(monkeypatch, 14, 30)
@@ -1174,7 +1181,7 @@ def test_opening_gif_goes_first_closing_gif_last(tmp_path, monkeypatch):
 
 
 def test_pause_before_each_next_message_grows_with_its_length(monkeypatch):
-    monkeypatch.setattr(bot_module, "BUBBLE_GAP_S", 1.0)
+    _patch_bot(monkeypatch, "BUBBLE_GAP_S", 1.0)
     assert bot_module.bubble_gap("ok") < bot_module.bubble_gap("x" * 80) <= bot_module.BUBBLE_MAX_GAP_S
     assert bot_module.bubble_gap("x" * 1000) == bot_module.BUBBLE_MAX_GAP_S
     events = []
@@ -1352,7 +1359,7 @@ def test_meme_command_sends_a_gif_first_even_mid_session(tmp_path, monkeypatch):
     from running_coach import tools
     b, store = _bot(tmp_path, monkeypatch)
     monkeypatch.setattr(tools, "store", store)
-    monkeypatch.setattr(bot_module, "settings", dataclasses.replace(bot_module.settings, giphy_api_key="k"))
+    _patch_bot(monkeypatch, "settings", dataclasses.replace(bot_module.settings, giphy_api_key="k"))
     t0 = datetime.datetime(2026, 11, 13, 18, 0, tzinfo=bot_module.TZ)
     store.touch_interaction(t0)
     store.mark_gif(t0)                                                         # session GIF already used
@@ -1406,7 +1413,7 @@ def test_meme_command_sends_a_gif_first_even_mid_session(tmp_path, monkeypatch):
 def test_chosen_dish_with_boxes_counts_as_eaten_and_meal_question_waits_an_hour(tmp_path, monkeypatch):
     import dataclasses
     b, store = _bot(tmp_path, monkeypatch)
-    monkeypatch.setattr(bot_module, "settings",
+    _patch_bot(monkeypatch, "settings",
                         dataclasses.replace(bot_module.settings, meal_check_times=[(14, 30), (21, 30)]))
     mid = store.add_proposal("🌮 Tortilla", kind="meal", uses=[], recipe="1. Cuire", makes="1 boîte", macros={"kcal": 700})
     _click(b, f"m:{mid}")

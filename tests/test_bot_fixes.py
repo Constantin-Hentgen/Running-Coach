@@ -7,6 +7,7 @@ import pytest
 
 from running_coach import agent
 from running_coach import bot as bot_module
+from running_coach.handlers import info, jobs, kitchen, meals, runs, ui
 from running_coach import voice, weather, weather_alerts
 from running_coach import calendar_store as cs
 from running_coach.config import TZ, settings
@@ -14,10 +15,16 @@ from running_coach.memory import Store
 from running_coach.weather_alerts import Hour
 
 
+def _patch_bot(monkeypatch, name, value):
+    """Le code du bot est réparti sur plusieurs modules : on patche `name` partout où il est lu."""
+    for module in (m for m in (bot_module, ui, meals, kitchen, runs, jobs, info) if hasattr(m, name)):
+        monkeypatch.setattr(module, name, value)
+
+
 def _bot(tmp_path, monkeypatch):
     """Bot sans Telegram : les messages envoyés sont capturés dans b.sent [(texte, boutons)]."""
     store = Store(tmp_path / "state.json")
-    monkeypatch.setattr(bot_module, "store", store)
+    _patch_bot(monkeypatch, "store", store)
 
     async def no_history(*args):
         pass
@@ -27,7 +34,7 @@ def _bot(tmp_path, monkeypatch):
     b.chat_id, b.sent = "42", []
     b._pending, b._pending_update, b._draining, b._last_message = [], None, False, 0.0
     monkeypatch.setattr(bot_module, "MESSAGE_DEBOUNCE_S", 0)
-    monkeypatch.setattr(bot_module, "BUBBLE_GAP_S", 0)
+    _patch_bot(monkeypatch, "BUBBLE_GAP_S", 0)
 
     async def fake_send(text, **kwargs):
         b.sent.append((text, kwargs.get("reply_markup")))
@@ -144,7 +151,7 @@ def test_enqueue_ignores_failing_notice(tmp_path, monkeypatch):
 
 def test_error_handler_only_apologises_to_authorized_chat(tmp_path, monkeypatch):
     b, _ = _bot(tmp_path, monkeypatch)
-    monkeypatch.setattr(bot_module, "Update", NS)   # isinstance(update, Update) avec de faux updates
+    _patch_bot(monkeypatch, "Update", NS)   # isinstance(update, Update) avec de faux updates
     ctx = NS(error=RuntimeError("x"))
     asyncio.run(b.on_error(NS(effective_chat=NS(id=999)), ctx))
     assert b.sent == []
@@ -157,7 +164,7 @@ def test_error_handler_only_apologises_to_authorized_chat(tmp_path, monkeypatch)
 
 def test_error_handler_never_raises(tmp_path, monkeypatch):
     b, _ = _bot(tmp_path, monkeypatch)
-    monkeypatch.setattr(bot_module, "Update", NS)
+    _patch_bot(monkeypatch, "Update", NS)
 
     async def down(text, **kwargs):
         raise RuntimeError("réseau")
