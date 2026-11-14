@@ -21,15 +21,23 @@ jobs:
           manifest-file: .release-please-manifest.json
 
       # release-please can't edit uv.lock reliably, and pull requests it opens don't trigger CI:
-      # on the release branch, sync the lockfile with the new version and run the tests here.
+      # on the open release branch, sync the lockfile with the new version and run the tests here.
+      - name: Find the open release pull request
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          branch=$(gh pr list -R "${{ github.repository }}" --state open --label "autorelease: pending" \
+            --json headRefName -q '.[0].headRefName')
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
-        if: ${{ steps.release.outputs.pr }}
+        if: ${{ steps.pr.outputs.branch != '' }}
         with:
-          ref: ${{ fromJSON(steps.release.outputs.pr).headBranchName }}
+          ref: ${{ steps.pr.outputs.branch }}
       - uses: astral-sh/setup-uv@v6
-        if: ${{ steps.release.outputs.pr }}
+        if: ${{ steps.pr.outputs.branch != '' }}
       - name: Sync uv.lock and test the release branch
-        if: ${{ steps.release.outputs.pr }}
+        if: ${{ steps.pr.outputs.branch != '' }}
         run: |
           uv lock
           uv sync --frozen --python 3.13
