@@ -1,7 +1,7 @@
 # 🏃 Running Coach — an AI running coach on Telegram
 
 A self-hosted personal running coach that you talk to **in plain language on Telegram**.
-The coach is **Bob**: a warm mate rather than a lecturer. He trusts you as the expert of your own training, reminds you of the essentials at the right time (the session, recovery, eating well, your goals in running, nutrition and health as a lifestyle) and keeps his messages to one or two short lines. The bot's Telegram display name is set to Bob at startup (`BOT_NAME`). His profile picture is in [`assets/bob.png`](assets/bob.png) (source: `assets/bob.svg`): send it to @BotFather with `/setuserpic`.
+The coach is **Bob**: a warm mate rather than a lecturer. He trusts you as the expert of your own training, reminds you of the essentials at the right time (the session, recovery, eating well, your goals in running, nutrition and health as a lifestyle) and keeps his messages to one or two short lines. Bob is just the default name: set `BOT_NAME` to call your coach whatever you like (persona, Telegram display name set at startup, help text). His profile picture is in [`assets/bob.png`](assets/bob.png) (source: `assets/bob.svg`): send it to @BotFather with `/setuserpic`.
 
 It schedules your sessions directly in **your CalDAV calendar (Radicale)**, relies on **your real training data (Dreeve)** and the **weather**, and **learns your preferences** as you chat.
 
@@ -172,6 +172,7 @@ The `RAIN_ALERT_*` variables keep their historical names but drive all weather a
 | `COACH_TZ` | `Europe/Paris` | Time zone |
 | `BRIEFING_TIME` | `08:00` | Briefing time; `off` = disabled |
 | `WEEKLY_REVIEW_TIME` | `sun 19:00` | Weekly review day (`mon`…`sun`) and time; `off` = disabled (`/review` still works) |
+| `BOT_NAME` | `Bob` | The coach's name: his persona in the prompt, the bot's Telegram display name (set at startup) and the help text |
 | `GIPHY_API_KEY` | *(empty)* | Free GIPHY API key ([developers.giphy.com](https://developers.giphy.com)). With it, Bob now and then adds a funny GIF or meme, only to open a conversation (before his first message of a session) or to close one (after his last): at most one per chat session (a session ends after 90 min of silence), only when it illustrates what he says, never on a serious topic. Empty = no GIFs |
 | `NEW_DISH_TIME` | `sat 10:00` | Once a week, Bob suggests one new dish you've never had, picked to break what you eat most (from the food log), with its recipe on a button; never the same twice, and it can show up among the `/eat` options until you try it; `off` = never |
 | `SHOP_LAST_CALL` | `19:30` | After this time (until 7:00) `/eat` and meal suggestions only use what's in stock, nothing to buy (your shop is about to close); `off` = shopping always possible |

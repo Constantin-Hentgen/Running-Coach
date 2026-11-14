@@ -20,7 +20,7 @@ from .memory import LEGS, PANTRY_ASK_GRACE_DAYS, store
 
 logger = logging.getLogger(__name__)
 
-BOT_NAME = "Bob"   # nom affiché du bot dans Telegram, et son personnage (voir agent.SYSTEM_PROMPT)
+BOT_NAME = settings.bot_name   # BOT_NAME : nom affiché dans Telegram et personnage du coach (voir agent.SYSTEM_PROMPT)
 
 MORNING_PROMPT = (
     "Réalise le briefing matinal. Analyse l'agenda Radicale, la météo, la charge, mon historique Dreeve, mes ressentis et "

@@ -327,3 +327,10 @@ def test_tool_calls_written_as_text_are_retried_and_never_shown(tmp_path, monkey
     assert {"role": "user", "content": nudge} in fake.calls[1]["messages"]           # relance explicite
     assert reply.text == "🍽️ Tortilla · ⏱️ 25 min"                                   # jamais affiché
     assert agent.pseudo_tool_calls("[send_gif: high five]\n[Note système, x]\n[propose_meal]") == ["send_gif", "propose_meal"]
+
+
+def test_bot_name_comes_from_settings():
+    from running_coach import commands
+    from running_coach.config import settings
+    assert f"Tu es {settings.bot_name}," in agent.SYSTEM_PROMPT and "__BOT_NAME__" not in agent.SYSTEM_PROMPT
+    assert f"c'est {settings.bot_name}" in commands.HELP_TEXT and "__BOT_NAME__" not in commands.HELP_TEXT
