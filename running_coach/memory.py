@@ -566,9 +566,9 @@ class Store:
 
     def log_meal(self, text: str, at: datetime.datetime, source: str = "conversation",
                  kcal=None, protein_g=None, carbs_g=None, fat_g=None, fiber_g=None, sugars_g=None, salt_g=None,
-                 items: list[dict] | None = None) -> dict:
+                 items: list[dict] | None = None, repeat: bool = False) -> dict:
         """Repas mangé : texte, aliments pesés (items, nutriments Ciqual) et totaux. Les entrées de plus de MEAL_LOG_DAYS
-        jours sont purgées."""
+        jours sont purgées. repeat : l'athlète a dit avoir remangé le même plat (pas un doublon)."""
         from .nutrition import meal_of
         text = " ".join((text or "").split())[:200]
         if not text:
@@ -592,7 +592,8 @@ class Store:
             item = {"id": self.state["next_meal_id"], "date": at.date().isoformat(), "time": f"{at:%H:%M}",
                     "slot": meal_of(at.time()), "text": text, "kcal": number(kcal), "protein_g": number(protein_g),
                     "carbs_g": number(carbs_g), "fat_g": number(fat_g), "fiber_g": number(fiber_g),
-                    "sugars_g": number(sugars_g), "salt_g": decimal(salt_g), "items": items or [], "source": source}
+                    "sugars_g": number(sugars_g), "salt_g": decimal(salt_g), "items": items or [], "source": source,
+                    **({"repeat": True} if repeat else {})}
             self.state["next_meal_id"] += 1
             self.state["meals"].append(item)
             self.state["meals"].sort(key=lambda m: (m["date"], m["time"]))
@@ -618,6 +619,25 @@ class Store:
             self.state["discoveries"].append({"title": title, "date": day.isoformat()})
             self.state["discoveries"] = self.state["discoveries"][-104:]   # deux ans de découvertes
             self._save()
+
+    def similar_meal(self, text: str, at: datetime.datetime) -> dict | None:
+        """Le même plat déjà noté à moins de DUPLICATE_HOURS heures de `at` (doublon probable), ou None."""
+        from .nutrition import DUPLICATE_HOURS, same_dish
+        at = at.astimezone(TZ).replace(tzinfo=None)
+        for m in reversed(self.state["meals"]):
+            when = datetime.datetime.fromisoformat(f"{m['date']}T{m['time']}")
+            if abs(when - at) <= datetime.timedelta(hours=DUPLICATE_HOURS) and same_dish(m["text"], text):
+                return dict(m)
+        return None
+
+    def remove_meal(self, meal_id: int) -> dict | None:
+        with self._lock:
+            item = next((m for m in self.state["meals"] if m["id"] == meal_id), None)
+            if item is None:
+                return None
+            self.state["meals"].remove(item)
+            self._save()
+            return dict(item)
 
     def meals_since(self, day: datetime.date) -> list[dict]:
         return [dict(m) for m in self.state["meals"] if m["date"] >= day.isoformat()]

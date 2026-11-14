@@ -841,8 +841,8 @@ def test_log_meal_tool_logs_updates_stock_and_reports(tmp_path, monkeypatch):
         tools.tool_log_meal({"description": "Dîner", "time": "2099-01-01T20:00:00"}, ledger)
     store.log_meal("Porridge banane", datetime.datetime(2026, 11, 11, 7, 30, tzinfo=tools.cs.TZ), kcal=450, protein_g=15)
     ctx = coaching.meals_context(store.meals_since(datetime.date(2026, 11, 10)), datetime.date(2026, 11, 11))
-    assert "hier (mar 10/11) :\n- 12:45 Curry de poulet (1 boîte) + pomme (~720 kcal, P 42 g, G 85 g)" in ctx
-    assert "aujourd'hui (mer 11/11) :\n- 07:30 Porridge banane (~450 kcal, P 15 g)\n  total estimé : ~450 kcal, P 15 g" in ctx
+    assert "hier (mar 10/11) :\n- #1 12:45 Curry de poulet (1 boîte) + pomme (~720 kcal, P 42 g, G 85 g)" in ctx
+    assert "aujourd'hui (mer 11/11) :\n- #2 07:30 Porridge banane (~450 kcal, P 15 g)\n  total estimé : ~450 kcal, P 15 g" in ctx
     assert {"log_meal", "propose_meal"} <= {t["name"] for t in tools.READ_ONLY_TOOLS}
 
 
@@ -885,7 +885,7 @@ def test_meal_question_only_without_any_trace_and_once(tmp_path, monkeypatch):
     asyncio.run(b.check_meal(1))
     text, markup = b.sent[-1]
     assert "Ce midi, tu as mangé quoi ?" in text and "texte ou en vocal" in text   # rien à deviner
-    assert _buttons(markup) == [("🙅 Sauté", "q:s:2026-11-11:1")]
+    assert markup is None   # jamais de bouton « sauté »
     asyncio.run(b.check_meal(1))                                             # déjà posée : pas deux fois
     assert len(b.sent) == 1
 
@@ -1024,9 +1024,9 @@ def test_meal_question_guesses_boxes_and_suggested_dishes_one_tap(tmp_path, monk
     _at(monkeypatch, 14, 30)
     asyncio.run(b.check_meal(1))
     text, markup = b.sent[-1]
-    assert text.startswith("🍽️ *Ce midi, tu as mangé quoi ?*") and "Touche le plat" in text
+    assert text.startswith("🍽️ *Ce midi, tu as mangé quoi ?*") and "Touche-le" in text
     labels = [label for label, _ in _buttons(markup)]
-    assert labels == ["🍱 Chili", "🍽️ Pâtes au thon", "🙅 Sauté"]   # boîte d'abord, puis le plat proposé
+    assert labels == ["🍱 Chili", "🍽️ Pâtes au thon"]   # boîte d'abord, puis le plat proposé
 
     chili = next(d for label, d in _buttons(markup) if "Chili" in label)
     q = _click(b, chili, markup)
@@ -1526,3 +1526,75 @@ def test_newroute_unknown_place_says_so(tmp_path, monkeypatch):
     message = NS(text="", chat=NS(send_action=_noop))
     asyncio.run(b.on_new_route(NS(message=message, effective_chat=NS(id=42)), NS(args=["8", "nature", "lac", "imaginaire"])))
     assert any("« lac imaginaire »" in t for t, _ in b.sent)
+
+
+# --- Journal alimentaire fiable (#44) -------------------------------------------
+
+def test_same_dish_and_log_issues():
+    from running_coach import nutrition
+    assert nutrition.same_dish("Curry de poulet", "Curry de poulet + riz (1 boîte)")
+    assert not nutrition.same_dish("Pâtes bolo", "Pâtes carbo")
+    assert not nutrition.same_dish("rien (déjeuner sauté)", "rien (dîner sauté)")
+    day = datetime.date(2026, 11, 11)
+    meals = [{"id": 1, "date": "2026-11-11", "time": "08:00", "text": "Porridge banane", "kcal": 450},
+             {"id": 2, "date": "2026-11-11", "time": "12:30", "text": "Bowl saumon riz", "kcal": 650},
+             {"id": 3, "date": "2026-11-11", "time": "13:40", "text": "Bowl saumon", "kcal": 650}]
+    issues = nutrition.log_issues(meals, day, datetime.datetime(2026, 11, 11, 16, 0))
+    assert any(i.startswith("#2 et #3 : « Bowl saumon » noté deux fois aujourd'hui") for i in issues)
+    assert not any("2 repas complets" in i for i in issues)        # déjà signalé comme doublon
+    assert "aucune trace du dîner aujourd'hui" not in issues        # dîner pas encore passé
+    assert "aucune trace du dîner hier" in issues                   # hier : rien noté du tout
+    meals[2]["repeat"] = True                                       # remangé, confirmé : plus un doublon
+    late = nutrition.log_issues(meals, day, datetime.datetime(2026, 11, 11, 23, 0))
+    assert not any("#2 et #3" in i for i in late) and "aucune trace du dîner aujourd'hui" in late
+    two_meals = [{"id": 5, "date": "2026-11-11", "time": "12:00", "text": "Pâtes bolo", "kcal": 700},
+                 {"id": 6, "date": "2026-11-11", "time": "14:00", "text": "Burger frites", "kcal": 900}]
+    assert any(i.startswith("2 repas complets au déjeuner aujourd'hui") for i in nutrition.log_issues(two_meals, day, datetime.datetime(2026, 11, 11, 15, 0)))
+
+
+def test_recipe_reminder_does_not_log_the_dish_twice(tmp_path, monkeypatch):
+    """Plat choisi via /eat, puis « rappelle-moi la recette » : le coach ne peut pas le noter une 2e fois."""
+    import pytest
+    from running_coach import tools
+    b, store = _bot(tmp_path, monkeypatch)
+    monkeypatch.setattr(tools, "store", store)
+    _at(monkeypatch, 12, 30)
+    dish = store.add_proposal("Curry de poulet", kind="meal", uses=[], recipe="1. Cuire le riz", macros={"kcal": 700})
+    _click(b, f"m:{dish}")
+    assert [m["text"] for m in store.meals_since(datetime.date(2026, 11, 11))] == ["Curry de poulet"]
+    ledger = tools.Ledger()
+    monkeypatch.setattr(tools.cs, "now_utc", lambda: datetime.datetime(2026, 11, 11, 13, 30, tzinfo=datetime.timezone.utc))
+    with pytest.raises(ValueError, match="déjà noté : #1"):
+        tools.tool_log_meal({"description": "Curry de poulet + riz", "time": "2026-11-11T13:15:00+01:00"}, ledger)
+    again = store.add_proposal("Curry de poulet", kind="meal", uses=[], recipe="1. Cuire le riz", macros={"kcal": 700})
+    _click(b, f"m:{again}")   # recette renvoyée et re-touchée : pas de 2e entrée
+    assert len(store.meals_since(datetime.date(2026, 11, 11))) == 1
+    out = tools.tool_log_meal({"description": "Curry de poulet", "time": "2026-11-11T13:15:00+01:00", "again": True}, ledger)
+    assert out["logged"]["repeat"] is True and len(store.meals_since(datetime.date(2026, 11, 11))) == 2
+    removed = tools.tool_remove_meal({"id": out["logged"]["id"]}, ledger)
+    assert removed["removed"]["text"] == "Curry de poulet" and len(store.meals_since(datetime.date(2026, 11, 11))) == 1
+    with pytest.raises(ValueError):
+        tools.tool_remove_meal({"id": 99}, ledger)
+    assert "remove_meal" in {t["name"] for t in tools.ALL_TOOLS} - {t["name"] for t in tools.READ_ONLY_TOOLS}
+
+
+def test_meal_question_offers_every_box_and_answers_a_duplicate(tmp_path, monkeypatch):
+    import dataclasses
+    b, store = _bot(tmp_path, monkeypatch)
+    _patch_bot(monkeypatch, "settings",
+               dataclasses.replace(bot_module.settings, meal_check_times=[(10, 30), (14, 30), (21, 30)]))
+    store.update_pantry(add=[{"name": n, "qty": "1 boîte", "boxes": True} for n in ("Chili", "Dahl", "Lasagnes")])
+    for t in ("Pâtes au thon", "Omelette", "Salade"):
+        store.add_proposal(t, kind="meal", uses=[], macros={})
+    _at(monkeypatch, 14, 30)
+    asyncio.run(b.check_meal(1))
+    text, markup = b.sent[-1]
+    labels = [label for label, _ in _buttons(markup)]
+    assert labels[:3] == ["🍱 Chili", "🍱 Dahl", "🍱 Lasagnes"] and len(labels) == 5 and "Sauté" not in " ".join(labels)
+    assert "sauté" not in text.casefold()
+    store.log_meal("Chili", datetime.datetime(2026, 11, 11, 12, 45, tzinfo=bot_module.TZ))   # déjà dit au coach
+    chili = next(d for label, d in _buttons(markup) if "Chili" in label)
+    _click(b, chili, markup)
+    assert b.sent[-1][0].strip() == "C'était déjà noté à 12:45 👌"
+    assert len(store.meals_since(datetime.date(2026, 11, 11))) == 1
+    assert any(p["name"] == "Chili" for p in store.pantry)    # la boîte n'est pas retirée deux fois

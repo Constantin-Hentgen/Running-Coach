@@ -114,7 +114,8 @@ def meal_hint(meals: list[tuple[int, str]]) -> str:
 
 
 MEAL_GUESS_HOURS = 36   # un plat proposé il y a plus longtemps n'est plus un candidat crédible
-MAX_MEAL_GUESSES = 3
+MAX_BOX_GUESSES = 4    # toutes les boîtes du stock d'abord (jusqu'à 4)
+MAX_DISH_GUESSES = 2   # puis les derniers plats proposés
 MEAL_SLOT_WHEN = {"petit-déjeuner": "Ce matin", "déjeuner": "Ce midi", "collation": "Cet après-midi", "dîner": "Ce soir"}
 
 
@@ -133,12 +134,14 @@ def meal_guesses(now: datetime.datetime) -> list[dict]:
     for pid, item in sorted(recent, key=lambda x: x[1]["created"], reverse=True):
         guesses.append({"text": item["text"], "uses": item.get("uses") or [], "macros": item.get("macros") or {},
                         "box": False, "source": pid})
-    seen, out = set(), []
+    seen, out, counts = set(), [], {True: 0, False: 0}
     for g in guesses:
-        if g["text"].casefold() not in seen:
-            seen.add(g["text"].casefold())
-            out.append(g)
-    return out[:MAX_MEAL_GUESSES]
+        if g["text"].casefold() in seen or counts[g["box"]] >= (MAX_BOX_GUESSES if g["box"] else MAX_DISH_GUESSES):
+            continue
+        seen.add(g["text"].casefold())
+        counts[g["box"]] += 1
+        out.append(g)
+    return out
 
 
 def close_meal_guesses(markup: InlineKeyboardMarkup | None) -> None:

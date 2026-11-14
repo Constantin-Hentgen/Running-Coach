@@ -185,10 +185,13 @@ def _macros(kcal, protein, carbs, fat=None) -> str:
     return ", ".join(p for p in parts if p)
 
 
-def meals_context(meals: list[dict], today: datetime.date) -> str:
-    """Repas notés (aujourd'hui et hier) avec le total estimé du jour."""
+def meals_context(meals: list[dict], today: datetime.date, now: datetime.datetime | None = None) -> str:
+    """Repas notés (aujourd'hui et hier) avec leur n°, le total estimé du jour et ce qui est à vérifier."""
+    from .nutrition import log_issues
+    issues = log_issues(meals, today, now) if now else []
+    check = ("\nÀ VÉRIFIER (calculé par le système) :\n" + "\n".join(f"- {i}" for i in issues)) if issues else ""
     if not meals:
-        return "aucun repas noté aujourd'hui ni hier"
+        return "aucun repas noté aujourd'hui ni hier" + check
     lines = []
     for day in (today - datetime.timedelta(days=1), today):
         of_day = [m for m in meals if m["date"] == day.isoformat()]
@@ -199,12 +202,13 @@ def meals_context(meals: list[dict], today: datetime.date) -> str:
         lines.append(f"{label} ({_day(day)}) :")
         for m in of_day:
             macros = _macros(m.get("kcal"), m.get("protein_g"), m.get("carbs_g"), m.get("fat_g"))
-            lines.append(f"- {m['time']} {m['text']}" + (f" ({macros})" if macros else ""))
+            lines.append(f"- #{m['id']} {m['time']} {m['text']}" + (f" ({macros})" if macros else "")
+                         + (" [remangé, confirmé]" if m.get("repeat") else ""))
         totals = [sum(m.get(k) or 0 for m in of_day) if any(m.get(k) is not None for m in of_day) else None
                   for k in ("kcal", "protein_g", "carbs_g")]
         if any(t is not None for t in totals):
             lines.append(f"  total estimé : {_macros(*totals)}")
-    return "\n".join(lines)
+    return "\n".join(lines) + check
 
 
 # ---------------------------------------------------------------------------

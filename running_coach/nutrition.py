@@ -223,6 +223,56 @@ def energy_context(meals: list[dict], runs: list[dict], profile: dict, today: da
 # ---------------------------------------------------------------------------
 
 MAIN_MEALS = ("petit-déjeuner", "déjeuner", "dîner")
+SLOT_ENDS = {"petit-déjeuner": datetime.time(10, 30), "déjeuner": datetime.time(15, 30), "dîner": datetime.time(22, 30)}
+FULL_MEAL_KCAL = 400     # deux repas de cette taille dans le même créneau : à vérifier
+DUPLICATE_HOURS = 3      # le même plat noté deux fois en moins de 3 h : doublon, sauf « encore » explicite
+_DISH_STOP = {"avec", "pour", "dans", "des", "les", "une", "aux", "sur", "sans", "plus", "boîte", "boîtes", "portion"}
+
+
+def dish_words(text: str) -> set[str]:
+    return {w for w in re.findall(r"[a-zà-ÿœæ]+", (text or "").casefold()) if len(w) >= 3 and w not in _DISH_STOP}
+
+
+def same_dish(a: str, b: str) -> bool:
+    """Même plat, à la formulation près : « Curry de poulet » ≈ « Curry de poulet + riz (1 boîte) »."""
+    wa, wb = dish_words(a), dish_words(b)
+    if not wa or not wb:
+        return " ".join(a.casefold().split()) == " ".join(b.casefold().split())
+    small, big = sorted((wa, wb), key=len)
+    return len(small & big) / len(small) >= 0.75
+
+
+def _when(m: dict) -> datetime.datetime:
+    return datetime.datetime.fromisoformat(f"{m['date']}T{m['time']}")
+
+
+def log_issues(meals: list[dict], today: datetime.date, now: datetime.datetime) -> list[str]:
+    """Incohérences du journal d'hier et d'aujourd'hui, calculées par le code : même plat noté deux fois, deux repas
+    complets dans le même créneau, repas principal passé sans aucune trace. Un repas noté « encore » (repeat) compte."""
+    out = []
+    for day in (today - datetime.timedelta(days=1), today):
+        label = "aujourd'hui" if day == today else "hier"
+        of_day = sorted((m for m in meals if m["date"] == day.isoformat()), key=lambda m: m["time"])
+        flagged: set[int] = set()
+        for i, a in enumerate(of_day):
+            for b in of_day[i + 1:]:
+                if b.get("repeat") or a["text"].startswith("rien (") or not same_dish(a["text"], b["text"]):
+                    continue
+                if (_when(b) - _when(a)) <= datetime.timedelta(hours=DUPLICATE_HOURS):
+                    out.append(f"#{a['id']} et #{b['id']} : « {b['text']} » noté deux fois {label} "
+                               f"({a['time']} et {b['time']}), doublon probable")
+                    flagged |= {a["id"], b["id"]}
+        slot = lambda m: slot_name(m.get("slot") or meal_of(datetime.time.fromisoformat(m["time"])))   # noqa: E731
+        for name in MAIN_MEALS:
+            mine = [m for m in of_day if slot(m) == name]
+            full = [m for m in mine if (m.get("kcal") or 0) >= FULL_MEAL_KCAL and not m.get("repeat")]
+            if len(full) >= 2 and not {m["id"] for m in full} <= flagged:
+                listed = ", ".join(f"#{m['id']} {m['time']} {m['text']}" for m in full)
+                out.append(f"{len(full)} repas complets au {name} {label} ({listed}) : mangé deux fois, ou doublon ?")
+            ended = day < today or now.time() >= SLOT_ENDS[name]
+            if not mine and ended:
+                out.append(f"aucune trace du {name} {label}")
+    return out
 LOW_INTAKE = 0.75        # apports < 75 % des besoins : trop peu
 HIGH_INTAKE = 1.4        # > 140 % : inhabituellement haut
 LIGHT_MAIN_MEAL_KCAL = 250
