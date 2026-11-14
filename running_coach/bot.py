@@ -27,9 +27,11 @@ MORNING_PROMPT = (
     "le compte à rebours de mes objectifs, en appliquant tout ce que tu sais de moi. "
     f"Met à jour / planifie les {settings.planning_horizon_days} prochains jours dans Radicale, en cohérence avec la "
     "périodisation vers mon objectif principal.\n"
-    "Puis envoie-moi un petit mot du matin, comme un pote : 1 ou 2 messages d'une ligne (séparés par une ligne vide) : "
-    "la séance du jour (ou le repos) et LE truc à ne pas oublier (météo, récup, repas…), plus ce qui a changé dans "
-    "l'agenda s'il y a lieu. Pas de titres, pas de chiffres inutiles."
+    "Fais-le en silence : ne me parle pas des semaines à venir ni de l'état du plan.\n"
+    "Puis envoie-moi un petit mot du matin, comme un pote : 1 ou 2 messages d'une ligne (séparés par une ligne vide), "
+    "seulement sur aujourd'hui : la séance du jour (ou le repos) et LE truc à ne pas oublier, plus ce qui a changé "
+    "aujourd'hui ou demain dans l'agenda s'il y a lieu. La météo seulement si elle change quelque chose aujourd'hui. "
+    "Pas de titres, pas de chiffres inutiles, pas de proposition au-delà de demain."
 )
 
 DEBRIEF_PROMPT = (
