@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.2.0](https://github.com/Constantin-Hentgen/Running-Coach/compare/v3.1.0...v3.2.0) (2026-11-14)
+
+
+### Added
+
+* **i18n:** configurable bot language (BOT_LANGUAGE: fr, en) ([#48](https://github.com/Constantin-Hentgen/Running-Coach/issues/48)) ([e9608f2](https://github.com/Constantin-Hentgen/Running-Coach/commit/e9608f2c0374b1a31c6a658d870edbff2febe849))
+
+
+### Fixed
+
+* **nutrition:** reliable food log and a daily 22:00 recap ([#46](https://github.com/Constantin-Hentgen/Running-Coach/issues/46)) ([dac8559](https://github.com/Constantin-Hentgen/Running-Coach/commit/dac855904165e02324bdd99bdaa8f14a49a7dba0))
+
 ## [3.1.0](https://github.com/Constantin-Hentgen/Running-Coach/compare/v3.0.0...v3.1.0) (2026-11-14)
 
 
