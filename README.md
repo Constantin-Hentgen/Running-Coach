@@ -1,378 +1,70 @@
-# 🏃 Running Coach — an AI running coach on Telegram
+<p align="center">
+  <img src="assets/bob.png" alt="Bob, the trail-running robot" width="160">
+</p>
 
-A self-hosted personal running coach that you talk to **in plain language on Telegram**.
-The coach is **Bob**: a warm mate rather than a lecturer. He trusts you as the expert of your own training, reminds you of the essentials at the right time (the session, recovery, eating well, your goals in running, nutrition and health as a lifestyle) and keeps his messages to one or two short lines. Bob is just the default name: set `BOT_NAME` to call your coach whatever you like (persona, Telegram display name set at startup, help text). His profile picture is in [`assets/bob.png`](assets/bob.png) (source: `assets/bob.svg`): send it to @BotFather with `/setuserpic`.
+<h1 align="center">Running Coach</h1>
 
-It schedules your sessions directly in **your CalDAV calendar (Radicale)**, relies on **your real training data (Dreeve)** and the **weather**, and **learns your preferences** as you chat.
+<p align="center">
+  A self-hosted AI running coach on Telegram: plans your sessions in your own calendar, knows your training data and the weather, tracks what you eat, and learns your preferences as you chat.
+</p>
 
-Powered by Claude (Anthropic), `claude-haiku-5-5` by default.
-
-> 🇫🇷 **The bot speaks French**: its prompts, replies, alerts and commands are in French. The examples below show what it actually sends.
+<p align="center">
+  <a href="https://github.com/Constantin-Hentgen/Running-Coach/actions/workflows/ci.yml"><img src="https://github.com/Constantin-Hentgen/Running-Coach/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/Constantin-Hentgen/Running-Coach/releases/latest"><img src="https://img.shields.io/github/v/release/Constantin-Hentgen/Running-Coach" alt="Latest release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/Constantin-Hentgen/Running-Coach" alt="MIT license"></a>
+  <img src="https://img.shields.io/badge/python-3.12%2B-blue" alt="Python 3.12+">
+</p>
 
 ```text
 You ▸ Décale ma sortie longue de samedi à dimanche matin, il va pleuvoir
 Bob ▸ C'est calé dimanche 9h, il fera sec 👌
 Bob ▸ Vas-y tranquille, t'as encore de la fatigue dans les jambes 😮‍💨
 ```
-*("Move my Saturday long run to Sunday morning, it's going to rain" → Bob moves it and says so in his own words. Every calendar write is still read back from the server; only a failure is shown, in one plain sentence.)*
 
----
+> [!NOTE]
+> The coach speaks **French**. This documentation is in English.
 
-## ✨ Features
+## Features
 
-- **Planning in your calendar**: creates, moves, edits and deletes sessions in a dedicated CalDAV calendar.
-- **Goals and periodization**: races and health goals are stored as structured data (date, target, priority). The plan is built backward from your main goal, with recovery weeks and a taper, and every reply knows the countdown.
-- **Morning briefing** (configurable time): reviews training load, weather, calendar and how you've been feeling, and adjusts the upcoming days.
-- **Automatic debrief** right after every run imported into Dreeve (Dreeve is checked every minute): the run vs the plan, vs your past performances, whether the coming sessions still fit, and where you stand on your goals. Then a **one-tap check-in**: perceived effort (1–10) and how your legs feel.
-- **Weekly review** on Sunday evening: planned vs done (computed by the code), form, goals, next week's key sessions.
-- **One-tap proposals**: when the coach suggests a change without making it, buttons let you ✅ apply, ✏️ adjust or ❌ ignore it.
-- **Voice messages**: talk to the coach; voice notes are transcribed **locally** with Whisper, nothing leaves your server.
-- **Persistent memory**: the coach remembers your preferences, habits, constraints, goals, injuries, food preferences and gear, and applies them every time it plans.
-- **Nutrition**: `/shopping` gives a shopping list for the coming days, matched to your sport and health goals and to the sessions in your calendar, with the days it covers and an estimated cost, sent as a **checklist in Telegram** (one button per item, tap to tick ✅ at the store), with matching **meal-prep recipes** on demand (`/recipes`), and optionally added to your shopping calendar as an event whose checklist follows your ticks.
-- **Weather alerts**: a Telegram message when rain, heat, strong gusts or ice are forecast during an upcoming session, with your other training place's forecast for comparison, an « Adapter » button, and a « bonne nouvelle » message if the forecast improves.
-- **Weather per training place** (e.g. home and work): each session is planned with the forecast for where you'll actually run that day.
-- **Real data**: training load (CTL/ATL/TSB, acute:chronic ratio), weekly volume, recent runs, plus every metric Dreeve's MCP server exposes (laps, zones, records…): the coach uses Dreeve's numbers instead of estimating its own.
-- **Right model for the job**: Haiku for everything day to day (conversation, debriefs, daily briefing, shopping), Sonnet only for the weekly review.
-- **Reliability**: every calendar write is **read back from the server**. Successful actions aren't listed (Bob says what matters, like a friend would), but any failure is added under his message **by the code**, in one plain sentence, and a claimed change that didn't happen gets a warning, so Bob can't pretend he did something he didn't.
+- 📅 **Plans in your CalDAV calendar** (Radicale), backward from your goals; every write is checked on the server
+- 🏃 **Uses your Dreeve data**: load, whole run history, a debrief and check-in after each run
+- 🌧️ **Weather alerts** per session and training place
+- 🥗 **Meals and nutrition**: meal ideas, shopping checklist, stock, food log computed from the Ciqual table
+- 🗺️ **Running loops** around home or work, as maps and GPX files
+- 🎙️ **Voice notes** transcribed locally, 🧠 **memory** of your preferences, single-user and self-hosted
 
----
+## Installation
 
-## 🏗️ Architecture
+Requirements: Docker with Compose, an [Anthropic](https://console.anthropic.com/settings/keys) API key, a Telegram bot from [@BotFather](https://t.me/BotFather) and a CalDAV calendar dedicated to running. See [Compatibility](https://github.com/Constantin-Hentgen/Running-Coach/wiki/Compatibility).
 
-```mermaid
-flowchart LR
-    TG[Telegram] <--> BOT[Bot<br/>bot.py]
-    SCHED[Scheduler<br/>briefing, new runs, rain] --> BOT
-    BOT --> AGENT[Claude agent<br/>agent.py]
-    AGENT -- preloaded context --> CTX[Calendar 45 d · Weather 7 d per place · Dreeve load & runs]
-    AGENT -- tools --> CAL[(Radicale<br/>CalDAV)]
-    AGENT -- tools --> MEM[(Memory<br/>/data volume)]
-    AGENT -- MCP tools --> DRV[(Dreeve<br/>read-only)]
-```
-
-| Module | Role |
-|---|---|
-| `running_coach/app.py` | FastAPI app (`/health` only; `/docs`, `/redoc` and `/openapi.json` are disabled), starts the bot and the scheduler, connectivity checks |
-| `running_coach/bot.py` | The Telegram bot: conversation flow (message queue, voice, ask and deliver, auth, error handler), button dispatch, proposals, `build_bot` |
-| `running_coach/handlers/` | The bot's features, one mixin each: `ui.py` (sending, bubbles, keyboards), `meals.py` (/eat, meal questions and suggestions, dish of the week, nutrition check), `kitchen.py` (shopping list, /recipes, stock), `runs.py` (new runs, debriefs, check-ins), `jobs.py` (briefing, weekly review, weather alerts), `info.py` (instant commands, /routes, /meme) |
-| `running_coach/agent.py` | System prompt, real-time context, model routing, tool loop with prompt caching |
-| `running_coach/tools.py` | Tools exposed to the model (calendar, memory, goals, proposals, shopping list), action ledger, verified report |
-| `running_coach/coaching.py` | Logic computed by the code: goal countdowns, check-in summary, weekly planned vs done |
-| `running_coach/commands.py` | Command list, help text, instant replies |
-| `running_coach/calendar_store.py` | CalDAV + iCalendar access: reads, writes verified by read-back, shopping task list |
-| `running_coach/dreeve.py` | Dreeve REST API: preloaded context, new-run detection |
-| `running_coach/dreeve_mcp.py` | Dreeve MCP client: on-demand detail tools |
-| `running_coach/memory.py` | Persistent memory, goals, proposals, check-ins, chat history, state |
-| `running_coach/weather_alerts.py` | Weather alerts: upcoming sessions × hourly forecast at their place (rain, heat, wind, ice, all-clear) |
-| `running_coach/voice.py` | Local voice-note transcription (faster-whisper) |
-| `running_coach/weather.py` | Open-Meteo forecasts for every training place (single request) |
-| `running_coach/config.py` | Reads **all** configuration from the environment |
-
----
-
-## ✅ Requirements
-
-| Service | Required | Notes |
-|---|---|---|
-| [Docker](https://docs.docker.com/get-docker/) + Docker Compose | yes | any server works, a mini PC is plenty |
-| [Anthropic](https://console.anthropic.com/settings/keys) API key | yes | pay-per-use, see [Costs](#-costs) |
-| Telegram bot | yes | created in a minute with [@BotFather](https://t.me/BotFather) |
-| CalDAV server ([Radicale](https://radicale.org)) | yes | with a **calendar dedicated to running** (the coach creates and deletes events in it) |
-| [Dreeve](https://docs.dreeve.app) instance | recommended | without it the coach plans blind (no load or history) |
-
----
-
-## 🚀 Quick start
-
-```bash
-git clone <repository-url> running-coach && cd running-coach
-cp .env.example .env
-```
-
-1. **Fill in `.env`**: at least `ANTHROPIC_API_KEY`, `TELEGRAM_BOT_TOKEN`, `RADICALE_URL/USER/PASS`. Add Dreeve and your training places (`WEATHER_LOCATIONS`) for real coaching (see [Configuration](#️-configuration)).
-2. **Start it**:
+1. Get the code and create your configuration:
+   ```bash
+   git clone https://github.com/Constantin-Hentgen/Running-Coach.git && cd Running-Coach
+   cp .env.example .env
+   ```
+2. Fill in `.env`: at least `ANTHROPIC_API_KEY`, `TELEGRAM_BOT_TOKEN`, `RADICALE_URL`, `RADICALE_USER`, `RADICALE_PASS` ([all options](https://github.com/Constantin-Hentgen/Running-Coach/wiki/Configuration)).
+3. Build and start it:
    ```bash
    docker compose up -d --build
-   docker compose logs -f
    ```
-   The logs show what is enabled (`[CONFIG] …`) and a check of each service (`[DREEVE]`, `[DREEVE MCP]`, `[METEO]`, `[RADICALE]`).
-3. **Get your chat ID**: send any message to your bot. While `TELEGRAM_CHAT_ID` is empty, it runs in *setup mode* and only replies with your ID.
-4. **Put that ID** in `TELEGRAM_CHAT_ID`, then run `docker compose up -d` to restart. The bot now only obeys you, and the briefing, debriefs and rain alerts are active.
-5. **Introduce yourself** to your coach: goals, constraints, preferences. It remembers them (check with `/memory`).
 
-### Deploying with Portainer (stack from the Git repository)
+## Quickstart
 
-1. *Stacks → Add stack → Repository*: repository URL, reference `refs/heads/main`, path `docker-compose.yml`.
-2. Under **Environment variables**, switch to *Advanced mode* and paste the content of your `.env` (the repository intentionally has none). One `NAME=value` per line: **values must fit on a single line**.
-3. *Deploy the stack*. `docker-compose.yml` injects each variable (`${NAME}`); a missing variable falls back to its default.
+Message your bot: while `TELEGRAM_CHAT_ID` is empty it only replies with your chat ID. Put that ID in `.env`, run `docker compose up -d` again, then introduce yourself to the coach (« Semi de Paris le 7 mars, je vise 1h45 ») and try `/help`. Details in [Getting Started](https://github.com/Constantin-Hentgen/Running-Coach/wiki/Getting-Started).
 
-To update: *Pull and redeploy* (no need to re-pull images, the image is built from the repository). The coach's memory lives in the `coach-data` volume and survives redeploys.
+## Documentation
 
----
+The **[wiki](https://github.com/Constantin-Hentgen/Running-Coach/wiki)** covers everything after installation:
 
-## ⚙️ Configuration
+- [Configuration](https://github.com/Constantin-Hentgen/Running-Coach/wiki/Configuration): every environment variable, with its type and default
+- [Deployment](https://github.com/Constantin-Hentgen/Running-Coach/wiki/Deployment): Docker Compose, Portainer, updates and backups
+- [Commands](https://github.com/Constantin-Hentgen/Running-Coach/wiki/Commands) and [Coaching](https://github.com/Constantin-Hentgen/Running-Coach/wiki/Coaching): what you can ask and what the coach does on its own
+- [Weather Alerts](https://github.com/Constantin-Hentgen/Running-Coach/wiki/Weather-Alerts), [Meals and Nutrition](https://github.com/Constantin-Hentgen/Running-Coach/wiki/Meals-and-Nutrition), [Running Routes](https://github.com/Constantin-Hentgen/Running-Coach/wiki/Running-Routes)
+- [Error Messages](https://github.com/Constantin-Hentgen/Running-Coach/wiki/Error-Messages) and [Known Limitations](https://github.com/Constantin-Hentgen/Running-Coach/wiki/Known-Limitations): when something goes wrong
+- [How It Works](https://github.com/Constantin-Hentgen/Running-Coach/wiki/How-It-Works), [Integrations](https://github.com/Constantin-Hentgen/Running-Coach/wiki/Integrations), [Privacy and Safeguards](https://github.com/Constantin-Hentgen/Running-Coach/wiki/Privacy-and-Safeguards), [Contributing](https://github.com/Constantin-Hentgen/Running-Coach/wiki/Contributing)
 
-**All** configuration goes through environment variables (`.env` locally, the stack variables in Portainer); nothing is hard-coded. [`.env.example`](.env.example) documents every variable. Values must be on a single line.
-
-### Required
-
-| Variable | Description |
-|---|---|
-| `ANTHROPIC_API_KEY` | Anthropic API key |
-| `TELEGRAM_BOT_TOKEN` | Bot token (@BotFather) |
-| `TELEGRAM_CHAT_ID` | Your chat ID (quick start, step 3). Empty = setup mode. [Why it's needed](#why-telegram_chat_id) |
-| `RADICALE_URL` | **Full** URL of the running calendar, e.g. `https://radicale.example.com/me/1a2b…/` |
-| `RADICALE_USER` / `RADICALE_PASS` | CalDAV credentials |
-
-### Shopping list (optional)
-
-| Variable | Default | Description |
-|---|---|---|
-| `RADICALE_SHOPPING_URL` | — | **Full** URL of your dedicated **shopping calendar** (not the training one). Besides the Telegram checklist, `/shopping` creates **one event** there at your shopping time, with the checklist by aisle in its description (kept in sync as you tick items in Telegram). Each new list replaces the coach's previous upcoming list; your own events there are never touched. Empty = Telegram checklist only. The older name `RADICALE_TASKS_URL` is still accepted |
-
-### Dreeve
-
-| Variable | Default | Description |
-|---|---|---|
-| `DREEVE_URL` | — | Instance root, e.g. `https://dreeve.example.com` (the older name `DREEVE_API_URL` is also accepted) |
-| `DREEVE_API_KEY` | — | REST key `drv_…` (*Settings → Security → API access*) |
-| `DREEVE_MCP_KEY` | — | MCP key `drvm_…` (*Settings → Security → MCP access*). **Must also be set in Dreeve's own `.env`** |
-| `DREEVE_MCP_URL` | `<DREEVE_URL>/mcp` | Only change it to target an internal URL |
-| `DREEVE_RUN_TYPES` | `Run,TrailRun,VirtualRun` | Activity types counted as running |
-
-### Weather
-
-| Variable | Default | Description |
-|---|---|---|
-| `WEATHER_LOCATIONS` | — | Your training places: `Maison: 48.85, 2.35 \| Travail: 48.89, 2.24`. Empty = weather disabled (the older single-place `WEATHER_LAT` / `WEATHER_LON` is still accepted) |
-| `WEATHER_API_URL` | Open-Meteo | Forecast endpoint (no key needed) |
-
-### Weather alerts
-
-| Variable | Default | Description |
-|---|---|---|
-| `RAIN_ALERT_CHECK_MINUTES` | `60` | How often to check; `0` = disabled |
-| `RAIN_ALERT_HOURS_AHEAD` | `48` | Sessions watched: those starting within the next N hours. The alert goes out as soon as the forecast shows rain, so with 48 you normally hear 24–48 h ahead |
-| `RAIN_ALERT_PROBABILITY` | `60` | Peak rain probability over the session's slot (%) that triggers an alert… |
-| `RAIN_ALERT_MIN_MM` | `0.3` | …and minimum total over the slot (mm), to ignore negligible drizzle |
-| `RAIN_ALERT_SKIP_KEYWORDS` | `repos,rest,off` | Whole words in an event title that exclude it |
-| `WEATHER_ALERT_HEAT_C` | `28` | Heat: peak "feels like" temperature over the slot (°C) |
-| `WEATHER_ALERT_GUST_KMH` | `50` | Wind: peak gusts over the slot (km/h) |
-| `WEATHER_ALERT_FREEZE_C` | `1` | Ice: minimum temperature (°C) at or below which snow, freezing rain or wet ground (rain in the 12 h before) triggers an alert |
-
-The `RAIN_ALERT_*` variables keep their historical names but drive all weather alerts.
-
-### Coach behavior
-
-| Variable | Default | Description |
-|---|---|---|
-| `CLAUDE_MODEL` | `claude-haiku-5-5` | Model for everything except the weekly review: conversation, voice, debriefs, daily briefing, shopping, commands |
-| `CLAUDE_PLANNING_MODEL` | `claude-sonnet-5-5` | Model for the weekly review only (automatic and `/review`), about once a week; set it to `claude-haiku-5-5` to use Haiku everywhere |
-| `CLAUDE_MAX_TOKENS` | `16000` | Max tokens per reply |
-| `CLAUDE_MAX_TOOL_ROUNDS` | `25` | Safeguard: max tool round-trips per message |
-| `COACH_TZ` | `Europe/Paris` | Time zone |
-| `BRIEFING_TIME` | `08:00` | Briefing time; `off` = disabled |
-| `WEEKLY_REVIEW_TIME` | `sun 19:00` | Weekly review day (`mon`…`sun`) and time; `off` = disabled (`/review` still works) |
-| `BOT_NAME` | `Bob` | The coach's name: his persona in the prompt, the bot's Telegram display name (set at startup) and the help text |
-| `GIPHY_API_KEY` | *(empty)* | Free GIPHY API key ([developers.giphy.com](https://developers.giphy.com)). With it, Bob now and then adds a funny GIF or meme, only to open a conversation (before his first message of a session) or to close one (after his last): at most one per chat session (a session ends after 90 min of silence), only when it illustrates what he says, never on a serious topic. Empty = no GIFs |
-| `NUTRITION_CHECK_TIME` | `22:30` | Evening nutrition check: if the day had a skipped or untracked main meal, intake far below (< 75 %) or above (> 140 %) needs, a very light main meal, or low protein / low carbs on a run day, Bob sends one short, kind message with an idea for tomorrow. Nothing when all is fine or nothing was logged; `off` = never |
-| `NEW_DISH_TIME` | `sat 10:00` | Once a week, Bob suggests one new dish you've never had, picked to break what you eat most (from the food log), with its recipe on a button; never the same twice, and it can show up among the `/eat` options until you try it; `off` = never |
-| `SHOP_LAST_CALL` | `19:30` | After this time (until 7:00) `/eat` and meal suggestions only use what's in stock, nothing to buy (your shop is about to close); `off` = shopping always possible |
-| `EAT_SUGGEST_TIMES` | `07:00,11:30,18:30` | When to suggest dishes on its own, like `/eat`, just before each meal. Skipped when the coach knows the meal is eaten elsewhere (lunch on office days, from its memory and the calendar), when `/eat` was just asked, or when the meal is already logged; `off` = never |
-| `MEAL_CHECK_TIMES` | `10:30,14:30,21:30` | When to ask « Qu'as-tu mangé ? » (about an hour after each meal), only if no meal was logged since the previous question (5 h at most); `off` = never |
-| `MEAL_BOXES` | `3` | How many meal-prep boxes (tups) you own: the coach plans batch cooking to fill the free ones, never more |
-| `PANTRY_CHECK_TIME` | `18:00` | Daily « Encore là ? » check on fresh stock items that reached their keep-by date; `off` = disabled |
-| `WHISPER_MODEL` | `small` | Whisper model for voice notes: `tiny`, `base`, `small`, `medium` (bigger = more accurate, slower, more RAM); `off` = voice disabled |
-| `ACTIVITY_POLL_MINUTES` | `1` | New-run detection interval; `0` = disabled |
-| `PLANNING_HORIZON_DAYS` | `30` | Days (re)planned by the briefing |
-| `CALENDAR_CONTEXT_DAYS` | `45` | Days of calendar given to the coach |
-| `HISTORY_MESSAGES` | `20` | Chat messages kept as history (10 exchanges) |
-| `COACH_SEED_MEMORY` | — | Starting knowledge, format `category: text \| category: text` (categories: `preference`, `habitude`, `contrainte`, `objectif`, `santé`, `nutrition`, `équipement`, `autre`). Read **once**, when the memory is first created. Single line |
-
-### Technical
-
-| Variable | Default | Description |
-|---|---|---|
-| `COACH_PORT` | `18000` | Host port for `/health` |
-| `COACH_DATA_DIR` | `/data` (Docker) | Persistent memory folder |
-| `HTTP_TIMEOUT` | `8` | Timeout for outgoing HTTP calls (s) |
-| `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`… |
-
----
-
-## 💬 Usage
-
-Just talk to it (in French), for example:
-
-- *« Planifie ma semaine prochaine, 4 séances, objectif semi en mars »* (plan next week, 4 sessions, half-marathon goal in March)
-- *« Je suis crevé, allège demain »* (I'm exhausted, make tomorrow easier)
-- *« Comment s'est passé mon fractionné d'hier ? »* (how did yesterday's intervals go? It fetches the laps from Dreeve)
-- *« Je préfère courir le matin avant 8h en semaine »* (I prefer running before 8am on weekdays: 🧠 remembered)
-- *« J'ai mal au tendon d'Achille gauche depuis lundi »* (my left Achilles has hurt since Monday: 🧠 remembered and taken into account)
-
-| Command | Effect |
-|---|---|
-| `/plan` | Planned sessions for the next 7 days; `/plan 14` for 14 (max 45) |
-| `/load` | Training load (CTL, ATL, TSB, A:C ratio, rest days) and the last 4 weeks' volume |
-| `/runs` | Your last 5 runs |
-| `/weather` | Forecast for each training place |
-| `/goals` | Your goals with the countdown |
-| `/memory` | Shows everything the coach knows about you, with each memory's number |
-| `/debrief` | AI debrief of your latest run (same short messages as the automatic one, read-only), then the check-in if not done yet |
-| `/review` | AI review of the current week: planned vs done, form, goals, next week |
-| `/shopping` | AI shopping list for the next 7 days (`/shopping 3` for 3, max 14), built from your sport and health goals, food preferences in memory, and the sessions planned over that period. Planned around 4–6 easy meal-prep recipes. Arrives as a Telegram checklist to tick at the store, headed by **how many days and which meals it covers** and an **estimated cost range** in euros; also saved as an event in your shopping calendar (`RADICALE_SHOPPING_URL`) at your shopping time, e.g. *« mets-la à 15h »* |
-| `/list` | Shows the current shopping checklist again (no AI) |
-| `/routes` | 2–3 running loops around today's session place (home or work, from `WEATHER_LOCATIONS`) at its distance, or `/routes travail 8`: they start and end at the place, favour footpaths, parks and quiet streets (BRouter on OpenStreetMap data), and come as an album of maps plus an album of GPX files |
-| `/newroute` | One loop you've never run: at least 80 % of it away from all your past Dreeve tracks |
-| `/nutrition` | What you ate today (meal by meal) and over 7 days: calories, protein, carbs, fat, fiber, and today's needs vs intake. Computed from the Ciqual table, no AI call |
-| `/meme` | A GIF or meme that sums up your training day (today's runs, calendar, check-ins, meals, weather), with one funny line. Needs `GIPHY_API_KEY` |
-| `/eat` | What to eat **right now** (Haiku): deduced from your kitchen stock, the time of day and your training (session just done or coming up), goals and memory. Gives the dish and why, total time, what comes from your stock and what to buy, quantities and short steps, and how many containers to make for later. Asks one or two questions first only when it really needs to. Also sent on its own just before meals (`EAT_SUGGEST_TIMES`) |
-| `/stock` | What you have in your kitchen (no AI), with how long ago each item was bought and, for fresh items, how long it keeps |
-| `/recipes` | Easy, container-friendly recipes for the current list (Haiku): a batch-cooking plan (what to cook when, how many containers) and 4–6 recipes with times, storage and steps, matched to your sessions and goals. Generated once per list, then shown again for free; `/recipes new` for different ones |
-| `/briefing` | Runs the full briefing now: reviews everything and adjusts the plan in your calendar |
-| `/help` (or `/start`) | Lists the commands |
-
-`/plan`, `/load`, `/runs`, `/weather`, `/goals`, `/memory`, `/list` and `/stock` answer instantly from your data, with no AI call (free). All commands appear in Telegram's `/` menu; the bot still answers in French.
-
-**Voice messages** 🎙️: send a voice note instead of typing. It is transcribed on your server (Whisper, `WHISPER_MODEL`), echoed back so you can check it, then handled like a written message. The model is downloaded on the first voice note (~500 MB for `small`, into the `coach-data` volume) and kept in memory afterwards (about 1 GB of RAM).
-
-**Goals**: just tell the coach, e.g. *« Semi de Paris le 7 mars, je vise 1h45 »* or *« je veux revenir à 72 kg »*. It stores them as structured goals (`🎯 Objectif enregistré` under its reply), plans backward from the main one, and shows the countdown in `/goals`.
-
-**Shopping checklist** 🛒: each list arrives as a Telegram message with one button per item, grouped by aisle, under a header showing what it covers and what it should cost (e.g. `📆 7 jours · 55–70 € estimés` / `🍽️ petits-déj, déjeuners en boîte, dîners`; the cost is the coach's estimate at typical French supermarket prices). Tap an item when it's in the basket (☐ → ✅, with a counter); « 🧹 Tout décocher » resets it. If the list is also in your shopping calendar, each tap updates the event's description too, so the calendar shows what's left. Editing the list in chat (*« enlève le poisson »*, *« ajoute des œufs »*, *« j'ai déjà les bananes et le skyr »*, which ticks them) updates the same event at the same time slot and sends a fresh checklist (the coach always sees the current list and what's ticked), and once `/recipes` has run, the recipes are added below the checklist in the event. A new list replaces the previous one (its old buttons stop working); `/list` brings the current one back.
-
-**Kitchen stock** 🥫: ticking an item on the shopping checklist puts it in your stock (unticking takes it out). Just tell the coach what you buy, finish or cook (*« j'ai fini le riz »*, *« il reste 2 œufs »*, *« j'ai fait le curry »*) and it updates the stock itself, silently. The coach sees the stock and how old each item is in every message: `/shopping` doesn't re-buy what you have and uses up fresh items first, and `/eat` cooks from it.
-
-Most of it needs no typing:
-- **Eaten / cooked buttons**: each dish `/eat` suggests and each recipe from `/recipes` comes with a button (`✅ Bowl saumon riz`). Tap it once you've eaten or cooked it and its ingredients leave the stock (or are reduced to what's left), with no AI call.
-- **Keep-by dates**: the coach gives each fresh item a shelf life when it goes on the list or into the stock (fish 2 days, vegetables about a week, dry goods none). Every day at `PANTRY_CHECK_TIME`, items that reached it come in one message with **Encore là / Fini** buttons per item; « encore là » pushes the date back by half the shelf life. Items you don't answer about within 3 days leave the stock on their own.
-- **Food log** 🍽️: tapping a dish's button logs it as eaten (a `/recipes` « cuisiné » button instead puts the boxes in the stock). When no meal is logged around a meal time (`MEAL_CHECK_TIMES`), the bot asks « Ce midi, tu as mangé quoi ? » with one button per likely dish (your ready meal boxes, oldest first, then dishes it suggested in the last 36 h) and **Sauté**. One tap logs the meal at the meal time and takes it out of the stock, with a one-line confirmation. Or answer in text or voice: the coach breaks the meal down into simple foods with estimated weights and the code computes its nutrients (kcal, protein, carbs, fat, sugars, fiber, salt) from the **Ciqual** food composition table, takes what you used out of the stock, and says in a few lines whether the day's food fits your training (session done or coming, load, goals) and what to eat next. You can also just tell it what you ate at any time. Today's and yesterday's meals are in the coach's context, so `/eat` and the briefing take them into account.
-
-**Proposals**: when the coach suggests a calendar change without making it (debrief, weekly review, weather alert), the message ends with the proposal and buttons: ✅ applies it, ✏️ lets you say what to change, ❌ keeps the plan as is. Each button works once.
-
-To correct the memory: *« oublie le #3 »* (forget #3), or simply say what changed: it replaces the old memory.
-
-### Automations
-
-- **Briefing** every day at `BRIEFING_TIME`: fitness status, check-ins, weather, goal countdown, plan adjustments over `PLANNING_HORIZON_DAYS` days.
-- **Weekly review** at `WEEKLY_REVIEW_TIME` (planning model): the code counts planned vs done for the week (a planned session counts as done if a run exists that day; runs without a planned session are listed as extra), then the coach reviews regularity, form, goals and next week's key sessions. Changes come as proposals with buttons.
-- **Weather alert** (every `RAIN_ALERT_CHECK_MINUTES` minutes): for each session in the next `RAIN_ALERT_HOURS_AHEAD` hours (default 48, so you normally get the alert 24–48 h before), the code reads the **hourly forecast for the exact time slot** at the **session's place**: ☔ rain, 🥵 heat, 💨 gusts, 🧊 ice. The place comes from the event's location field, which the coach fills in itself; otherwise from a place name mentioned in the session, otherwise the first place in `WEATHER_LOCATIONS`. One alert per new hazard per session, built by the code without calling the model (free). « 🔁 Adapter » asks the coach to move or adapt the session; « 👍 Je garde » keeps it. If every hazard disappears from the forecast later, a « ✅ Bonne nouvelle » message follows (once, at least 1 h before the session). Alerts are added to the chat history, so you can also simply reply « décale-la à demain » (move it to tomorrow) or « je la fais au travail » (I'll do it from work).
-  ```text
-  ⚠️ Météo à surveiller sur ta séance « Fractionné 8×400 m »
-  - 📅 mar 10/11 18:30–19:30 (dans 31 h)
-  - 📍 Maison : ☔ pluie 80 %, 2.4 mm · 💨 vent rafales 62 km/h
-  - 📍 Travail : ✅ RAS, bonne alternative
-  [🔁 Adapter] [👍 Je garde]
-  ```
-- **Debrief** within `ACTIVITY_POLL_MINUTES` minutes (default 1) of a new run appearing in Dreeve. Each check is a single Dreeve API call; the model only runs when there is a new run. Several runs imported at once are covered together. The debrief comes as 2 to 4 very short messages, like a chat: how the run went vs what was planned (laps/splits from Dreeve), the notable point vs your history (only if there is one), and whether the coming sessions still fit, with any change only *proposed* (buttons).
-
-  **Short messages everywhere**: every coach reply is sent as several small Telegram messages, one per paragraph (1–2 lines, one idea each), without headings or recaps, never more than 4 in a row (proposals included; the shortest ones are merged beyond that). Each next message comes after a short « typing… » pause that grows with its length. A reply that is still too long is rewritten once, shorter.
-
-  In debrief mode the coach has **no** calendar write access: use ✅ under a proposal, or reply « ok, fais-le » (ok, do it).
-
-  Right after, the **check-in** asks for your perceived effort (1–10) then your legs (🟢 fresh, 🟡 normal, 🟠 heavy, 🔴 pain), one tap each. The coach sees your last 14 days of check-ins (plus effort × minutes as a perceived load) in every reply and weighs them like the Dreeve data; « pain » triggers a follow-up question.
-
----
-
-## 🥗 Nutrition tracking
-
-Meals are stored as structured data: time, meal (breakfast, lunch, snack, dinner), each food with its estimated weight matched to the **ANSES Ciqual 2020** food composition table (2,298 foods, bundled as `running_coach/data/ciqual_2020.csv`, rebuilt with `scripts/build_ciqual.py`), and the computed nutrients. The model only estimates portions; the numbers come from the table.
-
-With your profile (weight, height, birth year, sex — Bob asks once), the coach also knows your **energy balance**: intake vs expenditure, estimated as resting metabolism (Mifflin-St Jeor) × 1.4 for daily life plus the calories of your Dreeve runs. Today so far, yesterday and the 7-day average are in Bob's context, and `/nutrition` shows them.
-
-## 🧠 Memory
-
-- The coach calls its own `remember` / `forget` tools whenever you express something lasting (preference, habit, constraint, goal, health, gear). It can also record a habit that is **clearly repeated** in your data.
-- Memory is updated silently: Bob doesn't narrate what he remembers (`/memory` lists it).
-- The memory is included in every message, briefing and debrief.
-- **Goals** are stored separately as structured data (`set_goal` / `remove_goal`), with date, target and priority (A = main goal of the season), shown under the reply as `🎯 Objectif enregistré : …`.
-- Everything is stored together with the chat history, proposals and check-ins in the `coach-data` Docker volume (`/data/coach_state.json`) and survives restarts and updates. Limits: 80 memories of 300 characters each, 15 goals.
-
----
-
-## 📊 Dreeve integration
-
-Dreeve is used **read-only**, through two complementary channels:
-
-| Channel | Key | When | Data |
-|---|---|---|---|
-| [REST API](https://docs.dreeve.app/api/) | `drv_…` | Automatically, with every message | Load (CTL, ATL, TSB, A:C ratio, TRIMP, monotony, strain), your **whole running history**: totals and records, volume per month since the start, weekly volume over 12 weeks, and one line per run with your notes (the oldest summarized per month past 150 runs) |
-| [MCP server](https://docs.dreeve.app/integrations/mcp/) | `drvm_…` | When the model asks | Every tool the server exposes (all read-only): laps, splits, streams, heart-rate zones, volume, activity search, shoes, streaks, and any performance metrics Dreeve provides. The tool list is logged at startup (`[DREEVE MCP] N outil(s) : …`) |
-
-REST is enough to coach; MCP lets the coach dig deeper (detailed debriefs, paces per zone, Dreeve's own metrics, which it is told to use rather than recompute). If MCP is unavailable, the coach carries on with the REST data.
-
----
-
-## Why `TELEGRAM_CHAT_ID`?
-
-Even if you only talk to the bot in a private chat, this value is still needed. In a private chat, the chat ID is simply **your Telegram user ID**. It serves two purposes:
-
-1. **Security**: a Telegram bot is public; anyone can find it and message it. Without this value, a stranger could control your calendar and read your training data. The bot ignores every other chat.
-2. **Messages the bot starts itself**: the briefing, debriefs and rain alerts are sent without you writing first, and Telegram won't let a bot message someone without knowing their ID.
-
-While it is empty, the bot runs in *setup mode*: it replies to every message only with the ID to put in your configuration.
-
-## 🛡️ Safeguards
-
-- **Single user**: the bot ignores any chat other than `TELEGRAM_CHAT_ID`.
-- **Verified writes**: every create/update/delete is read back from the CalDAV server; any mismatch counts as a failure.
-- **Honest by construction**: failures under each reply come from the code, never from the model; if the model claims a change it didn't make, a warning is added.
-- **The past is off-limits**: the code refuses to edit or delete past events.
-- **Identification by UID**: never a fuzzy search by title.
-- **One run at a time**: no concurrent calendar writes.
-- **Dreeve read-only**: no write calls at all.
-
----
-
-## 💶 Costs
-
-The only paid service is the Anthropic API. Conversation, debriefs and commands use Claude Haiku 5.5 ($0.10 / M input tokens, $0.50 / M output tokens): with **prompt caching** on the tool loop, a message typically costs a fraction of a cent. The daily briefing runs on Haiku too. Only the weekly review uses Claude Sonnet 5.5 ($2 / M input, $10 / M output): about one run a week, typically a few cents; set `CLAUDE_PLANNING_MODEL=claude-haiku-5-5` to keep everything on Haiku. Voice transcription runs locally and costs nothing. Token usage (including cache reads) is logged after every reply (`Tokens : {...}`, with the model used).
-
----
-
-## 🔒 Data and privacy
-
-- **Secrets**: only in your environment (`.env` / stack variables), excluded from Git (`.gitignore`) and from the Docker image (`.dockerignore`). The code contains no key, URL or personal data.
-- **Sent to Anthropic** with each message: your message (for a voice note, its transcription: the audio itself never leaves your server), the upcoming calendar, the weather, the Dreeve data, your memory, goals and check-ins.
-- **Sent elsewhere, only for the features that need it**: `/routes` and `/newroute` send the start point (your home or work coordinates) and the loop's waypoints to [brouter.de](https://brouter.de), and fetch map tiles of that area from tile.openstreetmap.org; `/eat` sends dish names to fr.wikibooks.org; GIFs send short English keywords to GIPHY. Nothing personal is ever added to these requests.
-- **Stored locally**: memory + the last `HISTORY_MESSAGES` chat messages (default 20) in the `coach-data` volume. To wipe everything: `docker compose down -v`.
-
----
-
-## 🧑‍💻 Development
-
-Managed with [uv](https://docs.astral.sh/uv/).
-
-```bash
-uv sync                                          # dependencies (pytest included)
-set -a && . ./.env && set +a                     # load the configuration
-uv run uvicorn running_coach.app:app --reload    # run locally (memory in ./data)
-uv run pytest                                    # tests
-```
-
-Tests need no keys and no network: Claude, Dreeve and MCP calls are mocked. They also check that every variable read by the code is passed by `docker-compose.yml` and documented in `.env.example`.
-
----
-
-## 🩺 Troubleshooting
-
-| Symptom | Likely cause |
-|---|---|
-| `[CONFIG] … manquante` at startup | A required variable is empty in `.env` (or in the Portainer stack variables) |
-| Portainer: `invalid environment variable: =` | A value spread over several lines (often `COACH_SEED_MEMORY`) or an empty row in the stack variables. Keep every value on one line |
-| Portainer: `env file … .env not found` | Outdated `docker-compose.yml`: update the repository (*Pull and redeploy*) |
-| A new variable from `.env.example` has no effect | It must also be listed in `docker-compose.yml` (a test checks this) |
-| The bot replies « Configuration : ajoute TELEGRAM_CHAT_ID=… » | Expected while `TELEGRAM_CHAT_ID` is empty (quick start, step 3) |
-| `[DREEVE MCP] Connexion impossible …` | `drvm_…` key missing or wrong here **or in Dreeve's own `.env`**; don't confuse it with the REST key `drv_…` |
-| `[DREEVE] … HTTP 401` | `DREEVE_API_KEY` invalid, or not set on the Dreeve side |
-| `[RADICALE] Échec de connexion CalDAV` | `RADICALE_URL` must point to the **calendar** (with its ID), not the server root |
-| Sessions are one hour off | Check `COACH_TZ` |
-| No weather in replies | `WEATHER_LOCATIONS` empty or malformed (startup fails with an explicit message if the format is wrong) |
-| `❌ Liste de courses non enregistrée dans Radicale` | `RADICALE_SHOPPING_URL` must be the **full** URL of the shopping calendar (with its ID), different from `RADICALE_URL` |
-| First voice note is slow | Expected: the Whisper model is downloaded once (`[VOIX] Chargement du modèle …` in the logs), then kept in memory |
-| Voice transcription is often wrong | Try `WHISPER_MODEL=medium` (more accurate, slower, ~1.5 GB) |
+Release notes: [CHANGELOG.md](CHANGELOG.md) and [Releases](https://github.com/Constantin-Hentgen/Running-Coach/releases).
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
-
-Nutrition data: Anses. 2020. Table de composition nutritionnelle des aliments Ciqual, [ciqual.anses.fr](https://ciqual.anses.fr) — [Licence Ouverte / Open Licence](https://www.etalab.gouv.fr/licence-ouverte-open-licence) (extract: energy, protein, carbohydrates, fat, sugars, fiber and salt per 100 g).
+[MIT](LICENSE). Nutrition data: Anses. 2020. Table de composition nutritionnelle des aliments Ciqual, [Licence Ouverte](https://www.etalab.gouv.fr/licence-ouverte-open-licence). Map data © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors.
