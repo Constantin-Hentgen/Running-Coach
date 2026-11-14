@@ -9,6 +9,7 @@ aussi être définie dans le `.env` de Dreeve, sinon il refuse toute requête.
 - Une session MCP est ouverte paresseusement pendant un run d'agent (seulement si
   le modèle appelle un outil Dreeve) et fermée à la fin du run, dans la même tâche.
 """
+import asyncio
 import contextlib
 import json
 import logging
@@ -25,6 +26,8 @@ logger = logging.getLogger(__name__)
 # Seuls ceux-ci sont retirés : leurs données sont déjà dans le contexte pré-chargé.
 EXCLUDED = {"get_training_load", "get_most_recent_activity"}
 MAX_RESULT_CHARS = 20_000
+CONNECT_TIMEOUT_S = 15   # ouverture de session MCP
+CALL_TIMEOUT_S = 30      # un appel d'outil qui reste muet ne doit pas figer le run
 PREFIX = "dreeve_"   # évite toute collision avec les outils locaux, et dit au modèle d'où vient la donnée
 
 _catalog: list[dict] | None = None
@@ -67,8 +70,9 @@ async def load_tools() -> list[dict]:
     if _catalog is not None or not enabled():
         return _catalog or []
     try:
-        async with _connect() as session:
-            listed = await session.list_tools()
+        async with asyncio.timeout(CONNECT_TIMEOUT_S + CALL_TIMEOUT_S):
+            async with _connect() as session:
+                listed = await session.list_tools()
     except Exception as e:
         logger.error(f"[DREEVE MCP] Connexion impossible ({settings.dreeve_mcp_url}) : {_root_cause(e)} — vérifie que "
                      "DREEVE_MCP_KEY (drvm_…, pas la clé REST drv_…) est définie ici ET dans le .env de Dreeve.")
@@ -103,8 +107,9 @@ class McpRun:
             return {"ok": False, "error": f"outil Dreeve non autorisé : {name}"}
         try:
             if self._session is None:
-                self._session = await self._stack.enter_async_context(_connect())
-            result = await self._session.call_tool(name, args or {})
+                self._session = await asyncio.wait_for(self._stack.enter_async_context(_connect()), CONNECT_TIMEOUT_S)
+            result = await asyncio.wait_for(
+                self._session.call_tool(name, args or {}, read_timeout_seconds=CALL_TIMEOUT_S), CALL_TIMEOUT_S + 5)
         except Exception as e:
             cause = _root_cause(e)
             logger.error(f"[DREEVE MCP] {name} en échec : {cause}")

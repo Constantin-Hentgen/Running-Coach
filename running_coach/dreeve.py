@@ -225,18 +225,38 @@ def get_load() -> dict:
     return _get_json("/metrics/training-load")
 
 
-def get_summary() -> str:
-    """Contexte Dreeve complet ; chaque bloc échoue indépendamment."""
+def get_summary(runs: list[dict] | None = None, runs_error: Exception | None = None) -> str:
+    """Contexte Dreeve complet ; chaque bloc échoue indépendamment. `runs` : runs déjà lus (évite de les relire)."""
     if not settings.dreeve_enabled:
         return "Dreeve non configuré."
+
+    def runs_text() -> str:
+        if runs_error is not None:
+            raise runs_error
+        if runs is None:
+            return get_runs_text()
+        return format_runs(runs, datetime.datetime.now(TZ).date())
+
     parts = []
-    for fn in (get_load_text, get_runs_text):
+    for name, fn in (("get_load_text", get_load_text), ("get_runs_text", runs_text)):
         try:
             parts.append(fn())
         except Exception as e:
-            logger.error(f"Erreur Dreeve ({fn.__name__}) : {e}")
+            logger.error(f"Erreur Dreeve ({name}) : {e}")
             parts.append(f"(indisponible : {e})")
     return "\n".join(parts)
+
+
+def get_context() -> tuple[str, list[dict]]:
+    """(texte de contexte, tous les runs) en ne lisant les runs qu'une fois."""
+    if not settings.dreeve_enabled:
+        return get_summary(), []
+    try:
+        runs = get_all_runs()
+    except Exception as e:
+        logger.error(f"Erreur Dreeve (get_all_runs) : {e}")
+        return get_summary(runs_error=e), []
+    return get_summary(runs), runs
 
 
 def get_recent_runs(count: int = 5) -> list[dict]:
