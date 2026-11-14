@@ -22,7 +22,7 @@ Bob ▸ Vas-y tranquille, t'as encore de la fatigue dans les jambes 😮‍💨
 ```
 
 > [!NOTE]
-> The coach speaks **French**. This documentation is in English.
+> The coach speaks **French** by default, or **English** with `BOT_LANGUAGE=en` ([Configuration](https://github.com/Constantin-Hentgen/Running-Coach/wiki/Configuration#bot-language)).
 
 ## Features
 
@@ -31,7 +31,7 @@ Bob ▸ Vas-y tranquille, t'as encore de la fatigue dans les jambes 😮‍💨
 - 🌧️ **Weather alerts** per session and training place
 - 🥗 **Meals and nutrition**: meal ideas, shopping checklist, stock, food log computed from the Ciqual table
 - 🗺️ **Running loops** around home or work, as maps and GPX files
-- 🎙️ **Voice notes** transcribed locally, 🧠 **memory** of your preferences, single-user and self-hosted
+- 🎙️ **Voice notes** transcribed locally, 🧠 **memory** of your preferences, 🌍 French or English, single-user and self-hosted
 
 ## Installation
 
@@ -42,7 +42,7 @@ Requirements: Docker with Compose, an [Anthropic](https://console.anthropic.com/
    git clone https://github.com/Constantin-Hentgen/Running-Coach.git && cd Running-Coach
    cp .env.example .env
    ```
-2. Fill in `.env`: at least `ANTHROPIC_API_KEY`, `TELEGRAM_BOT_TOKEN`, `RADICALE_URL`, `RADICALE_USER`, `RADICALE_PASS` ([all options](https://github.com/Constantin-Hentgen/Running-Coach/wiki/Configuration)).
+2. Fill in `.env`: at least `ANTHROPIC_API_KEY`, `TELEGRAM_BOT_TOKEN`, `RADICALE_URL`, `RADICALE_USER`, `RADICALE_PASS`, and `BOT_LANGUAGE=en` for English ([all options](https://github.com/Constantin-Hentgen/Running-Coach/wiki/Configuration)).
 3. Build and start it:
    ```bash
    docker compose up -d --build
