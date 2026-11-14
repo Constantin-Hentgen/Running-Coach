@@ -353,7 +353,12 @@ class CoachBot:
                 while (wait := self._last_message + MESSAGE_DEBOUNCE_S - loop.time()) > 0:
                     await asyncio.sleep(wait)
                 texts, self._pending = self._pending, []
-                await self._ask_and_reply(self._pending_update, merge_messages(texts))
+                try:
+                    await self._ask_and_reply(self._pending_update, merge_messages(texts))
+                except Exception:   # un envoi raté ne doit pas laisser les messages suivants sans réponse
+                    logger.exception("Réponse au message en échec")
+                    with contextlib.suppress(Exception):
+                        await self._push("Oups, mon message n'est pas parti 🥲 Réessaie ?")
         finally:
             self._draining = False
 
@@ -365,7 +370,9 @@ class CoachBot:
         if not voice.enabled():
             await update.message.reply_text("🎙️ Les messages vocaux sont désactivés (WHISPER_MODEL=off). Écris-moi plutôt.")
             return
-        if media.duration and media.duration > voice.MAX_SECONDS:
+        duration = media.duration
+        seconds = duration.total_seconds() if isinstance(duration, datetime.timedelta) else duration   # PTB v23 : timedelta
+        if seconds and seconds > voice.MAX_SECONDS:
             await update.message.reply_text(f"🎙️ Vocal trop long (max {voice.MAX_SECONDS // 60} min). Fais plus court ou écris-moi.")
             return
         typing = asyncio.create_task(self._keep_typing(update))
@@ -383,6 +390,16 @@ class CoachBot:
             return
         await update.message.reply_text(f"🎙️ « {text} »")
         await self._enqueue(update, text)
+
+    async def on_error(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Exception non gérée d'un handler : on la journalise, et on s'excuse auprès du chat autorisé. Ne lève jamais."""
+        try:
+            logger.error("Exception non gérée dans un handler", exc_info=context.error, extra={"update": str(update)})
+            chat = update.effective_chat if isinstance(update, Update) else None
+            if chat is not None and self.chat_id and str(chat.id) == self.chat_id:
+                await self._push("Oups, une erreur de mon côté 🥲 Réessaie dans un instant ?")
+        except Exception:
+            logger.exception("Gestionnaire d'erreurs en échec")
 
     async def _ask_and_reply(self, update: Update, prompt: str, allow_writes: bool = True,
                              planning: bool = False, header: str = "") -> None:
@@ -824,8 +841,7 @@ class CoachBot:
                 f"{rpe}/10, ok 👌 Et les jambes ?",
                 parse_mode=ParseMode.MARKDOWN, reply_markup=legs_markup(activity_id))
         elif step == "l" and value in LEGS:
-            item = store.set_checkin(activity_id, legs=value)
-            rpe = f"effort {item['rpe']}/10, " if item.get("rpe") else ""
+            store.set_checkin(activity_id, legs=value)
             await query.edit_message_text("Merci 🙏" if value != "douleur" else "Aïe 😬")
             if value == "douleur":
                 await agent.add_to_history(self.chat_id, "[Ressenti après séance : douleur signalée]", PAIN_FOLLOW_UP)
@@ -1093,4 +1109,5 @@ def build_bot() -> CoachBot:
     app.add_handler(CallbackQueryHandler(bot.on_button))
     app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, bot.on_voice))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot.on_message))
+    app.add_error_handler(bot.on_error)
     return bot
