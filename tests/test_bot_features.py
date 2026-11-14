@@ -1436,7 +1436,7 @@ def test_meal_suggestion_is_about_the_meal_coming_now():
     tz = bot_module.TZ
     at = lambda h, m: datetime.datetime(2026, 11, 14, h, m, tzinfo=tz)
     assert [commands.meal_now(at(*t)) for t in ((7, 0), (11, 30), (16, 0), (18, 30))] == [
-        "petit-déjeuner", "déjeuner", "goûter", "dîner"]
+        "petit-déjeuner", "déjeuner", "collation", "dîner"]
     morning = commands.eat_prompt(at(7, 0), spontaneous=True)
     assert "Le repas concerné est le petit-déjeuner (ce matin)" in morning and "Pour ce matin" in morning
     assert "jamais pour un repas suivant" in morning and "ce midi" not in morning

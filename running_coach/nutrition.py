@@ -83,6 +83,9 @@ def public(food: dict) -> dict:
     return {k: v for k, v in food.items() if not k.startswith("_")}
 
 
+MAX_GRAMS = 2000   # par aliment
+
+
 def compute(items: list[dict]) -> dict:
     """items : [{food, grams, code?}] → {items: [...avec l'aliment Ciqual et ses nutriments], totals, unmatched}."""
     out, unmatched = [], []
@@ -93,7 +96,10 @@ def compute(items: list[dict]) -> dict:
             grams = 0
         label = " ".join(str(it.get("food") or "").split())[:80]
         food = foods().get(str(it.get("code") or "").strip()) or next(iter(search(label, 1)), None)
-        if food is None or grams <= 0:
+        if not 0 < grams <= MAX_GRAMS:   # un poids halluciné ne doit pas faire exploser la journée
+            unmatched.append(f"{label or it.get('code')} (poids invalide : {grams:g} g)")
+            continue
+        if food is None:
             unmatched.append(label or str(it.get("code")))
             continue
         values = {k: round(food[k] * grams / 100, 1) if food.get(k) is not None else None for k in NUTRIENTS}
@@ -109,15 +115,20 @@ def compute(items: list[dict]) -> dict:
 # Repas du jour et bilan énergétique
 # ---------------------------------------------------------------------------
 
+def slot_name(slot: str) -> str:
+    """Ancien « goûter » stocké dans le journal = collation."""
+    return "collation" if slot == "goûter" else slot
+
+
 def meal_of(t: datetime.time) -> str:
     """Le repas qui se mange à cette heure."""
     h = t.hour + t.minute / 60
     if 4 <= h < 10.5:
         return "petit-déjeuner"
-    if 10.5 <= h < 15:
+    if 10.5 <= h < 15.5:
         return "déjeuner"
-    if 15 <= h < 17.5:
-        return "goûter"
+    if 15.5 <= h < 17.5:
+        return "collation"
     return "dîner"
 
 
@@ -143,7 +154,7 @@ def day_totals(meals: list[dict], day: datetime.date) -> dict:
     of_day = [m for m in meals if m["date"] == day.isoformat()]
     totals = {k: round(sum(m.get(k) or 0 for m in of_day), 1) for k in NUTRIENTS}
     totals["meals"] = len([m for m in of_day if not m["text"].startswith("rien (")])
-    totals["slots"] = sorted({m.get("slot") or meal_of(datetime.time.fromisoformat(m["time"])) for m in of_day
+    totals["slots"] = sorted({slot_name(m.get("slot") or meal_of(datetime.time.fromisoformat(m["time"]))) for m in of_day
                               if not m["text"].startswith("rien (")})
     return totals
 
@@ -226,7 +237,7 @@ def anomalies(meals: list[dict], runs: list[dict], profile: dict, day: datetime.
     if not of_day:
         return []
     out = []
-    slot = lambda m: m.get("slot") or meal_of(datetime.time.fromisoformat(m["time"]))
+    slot = lambda m: slot_name(m.get("slot") or meal_of(datetime.time.fromisoformat(m["time"])))
     for name in MAIN_MEALS:
         mine = [m for m in of_day if slot(m) == name]
         if not mine:

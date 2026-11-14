@@ -5,6 +5,7 @@ from itertools import groupby
 
 from telegram import BotCommand
 
+from . import nutrition
 from .coaching import format_goals, format_pantry
 from .config import FR_DAYS, settings
 from .dreeve import format_activity, weekly_volume
@@ -160,17 +161,10 @@ def shops_open(now: datetime.datetime) -> bool:
 
 def meal_now(now: datetime.datetime) -> str:
     """Le repas qu'on va manger maintenant (ou juste après) : c'est le seul dont on parle."""
-    h = now.hour + now.minute / 60
-    if 4 <= h < 10.5:
-        return "petit-déjeuner"
-    if 10.5 <= h < 15:
-        return "déjeuner"
-    if 15 <= h < 17.5:
-        return "goûter"
-    return "dîner"
+    return nutrition.meal_of(now.time())
 
 
-MEAL_WHEN = {"petit-déjeuner": "ce matin", "déjeuner": "ce midi", "goûter": "le goûter", "dîner": "ce soir"}
+MEAL_WHEN = {"petit-déjeuner": "ce matin", "déjeuner": "ce midi", "collation": "la collation", "dîner": "ce soir"}
 
 
 def eat_prompt(now: datetime.datetime, spontaneous: bool = False) -> str:
@@ -215,7 +209,7 @@ def eat_prompt(now: datetime.datetime, spontaneous: bool = False) -> str:
         "colle, simplifie-la et adapte-la à mon stock, et finis la recette par « 📖 » + son lien ; garde-la bien simple. "
         "Pas de recette dans ton message : pour chaque plat, appelle propose_meal avec `mood`, `recipe` (ingrédients avec "
         "quantités pour le repas + les boîtes à remplir, 3 à 6 étapes courtes, et combien de boîtes mettre de côté), les "
-        "ingrédients du stock qu'il consomme (`uses`) et ses estimations (kcal, protéines, glucides). J'aurai un bouton "
+        "ingrédients du stock qu'il consomme (`uses`) et `items` (les aliments d'UNE portion, simples, avec leur poids estimé en grammes, comme pour log_meal : le système calcule les nutriments depuis la table Ciqual ; kcal et protéines seulement si un aliment ne se décompose pas). J'aurai un bouton "
         "par plat : quand je choisis, je reçois sa recette, ses ingrédients sortent du stock et le repas est noté. "
         "Tiens compte de ce que j'ai déjà mangé aujourd'hui (repas notés). Ne modifie pas l'agenda."
     )
@@ -243,7 +237,7 @@ NEW_DISH_PROMPT = (
     "découvrir cette semaine : que je n'ai jamais mangé (journal), jamais proposé en découverte avant (contexte), "
     "simple (40 min max), de saison et qui colle à mes objectifs. Choisis-le pour casser ce qui revient le plus "
     "souvent. Cherche une recette de base avec search_recipe, puis appelle propose_meal avec discovery: true, `mood`, "
-    "`recipe` (finie par « 📖 » + le lien si tu t'en sers), `uses` et tes estimations. "
+    "`recipe` (finie par « 📖 » + le lien si tu t'en sers), `uses` et `items` (les aliments d'UNE portion avec leur poids estimé : le système calcule les nutriments depuis la table Ciqual ; kcal seulement si impossible). "
     "Message : 1 ou 2 lignes, comme un pote qui te fait découvrir un truc, avec l'émoji du plat. Ne modifie pas "
     "l'agenda."
 )
@@ -271,7 +265,7 @@ def recipes_prompt(lst: dict) -> str:
         "- 🥣 Petits-déjeuners et collations rapides : 2-3 lignes.\n"
         "- Une ligne pour un article de la liste non utilisé ou un ingrédient qui manquerait.\n"
         "Pour chaque recette, appelle propose_meal (titre = nom de la recette, uses = articles de la liste ou du stock "
-        "qu'elle consomme, makes = nombre de boîtes ou portions, estimations par portion) : j'aurai un bouton « cuisiné » "
+        "qu'elle consomme, makes = nombre de boîtes ou portions, `items` = les aliments d'UNE portion avec leur poids estimé, le système calcule les nutriments depuis la table Ciqual ; kcal seulement si un aliment ne se décompose pas) : j'aurai un bouton « cuisiné » "
         "qui retirera les ingrédients du stock et y mettra les boîtes.\n"
         "Ne modifie pas l'agenda et n'appelle pas save_shopping_list."
     )

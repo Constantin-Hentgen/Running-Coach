@@ -128,7 +128,8 @@ def test_planning_model_and_proposal_without_false_claim_warning(tmp_path, monke
     assert store.proposal(reply.proposals[0][0])["text"] == "Déplacer le seuil de jeudi à vendredi 18:00"
     assert "Aucune modification" not in reply.text   # « déplacer » proposé, pas prétendu fait
     names = {t["name"] for t in fake.calls[0]["tools"]}
-    assert {"propose_change", "set_goal", "remove_goal"} <= names and "create_calendar_event" not in names
+    assert {"propose_change", "set_goal"} <= names and "create_calendar_event" not in names
+    assert not {"forget", "remove_goal"} & names   # lecture seule : rien d'effaçable
 
 
 def test_claim_detection_ignores_negations_questions_and_infinitives():
