@@ -71,3 +71,24 @@ def test_chosen_dish_carries_computed_nutrients(tmp_path, monkeypatch):
     assert macros["kcal"] == 315 and macros["items"][0]["grams"] == 250 and out["portion"]["kcal"] == 315
     meal = store.log_meal("🍝 Pâtes au thon", datetime.datetime(2026, 11, 14, 20, 0, tzinfo=TZ), **macros)
     assert meal["kcal"] == 315 and meal["slot"] == "dîner"
+
+
+def test_evening_anomalies_detected_by_code():
+    day = datetime.date(2026, 11, 14)
+    profile = {"weight_kg": 70, "height_cm": 178, "birth_year": 1996, "sex": "homme"}
+    run = {"startDateLocal": "2026-11-14T08:00:00", "distanceInMeter": 10000, "calories": 650}
+    meals = [
+        {"date": "2026-11-14", "time": "08:00", "slot": "petit-déjeuner", "text": "rien (petit-déjeuner sauté)",
+         "kcal": 0, "protein_g": 0, "carbs_g": 0, "fat_g": 0, "fiber_g": 0, "sugars_g": 0, "salt_g": 0},
+        {"date": "2026-11-14", "time": "12:30", "slot": "déjeuner", "text": "Salade", "kcal": 180, "protein_g": 8,
+         "carbs_g": 10, "fat_g": 9, "fiber_g": 4, "sugars_g": 3, "salt_g": 1},
+        {"date": "2026-11-14", "time": "20:00", "slot": "dîner", "text": "Pâtes", "kcal": 700, "protein_g": 25,
+         "carbs_g": 100, "fat_g": 15, "fiber_g": 5, "sugars_g": 4, "salt_g": 1},
+    ]
+    issues = nutrition.anomalies(meals, [run], profile, day)
+    assert "petit-déjeuner sauté" in issues and "déjeuner très léger (~180 kcal)" in issues
+    assert any(i.startswith("apports bas") for i in issues) and any(i.startswith("protéines basses") for i in issues)
+    assert any(i.startswith("jour de course avec peu de glucides") for i in issues)
+    assert nutrition.anomalies([], [run], profile, day) == []                    # nothing logged: no judgement
+    only_dinner = nutrition.anomalies(meals[2:], [], profile, day)
+    assert "aucune trace du petit-déjeuner" in only_dinner and "aucune trace du déjeuner" in only_dinner

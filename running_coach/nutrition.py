@@ -205,3 +205,49 @@ def energy_context(meals: list[dict], runs: list[dict], profile: dict, today: da
         lines.append(f"- Repères : protéines {lo * float(w):.0f}-{hi * float(w):.0f} g/j, glucides les jours de course "
                      f"{clo * float(w):.0f}-{chi * float(w):.0f} g/j")
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Contrôle quotidien : ce qui cloche (détecté par le code, formulé ensuite par le coach)
+# ---------------------------------------------------------------------------
+
+MAIN_MEALS = ("petit-déjeuner", "déjeuner", "dîner")
+LOW_INTAKE = 0.75        # apports < 75 % des besoins : trop peu
+HIGH_INTAKE = 1.4        # > 140 % : inhabituellement haut
+LIGHT_MAIN_MEAL_KCAL = 250
+LOW_PROTEIN_G_PER_KG = 1.2
+LOW_CARBS_G_PER_KG_RUN_DAY = 4
+
+
+def anomalies(meals: list[dict], runs: list[dict], profile: dict, day: datetime.date) -> list[str]:
+    """Ce qui cloche dans la journée : repas manquants ou sautés, apports trop bas ou trop hauts, repas très léger,
+    protéines ou glucides bas un jour de course. Rien si la journée n'est pas notée du tout (pas d'info, pas de jugement)."""
+    of_day = [m for m in meals if m["date"] == day.isoformat()]
+    if not of_day:
+        return []
+    out = []
+    slot = lambda m: m.get("slot") or meal_of(datetime.time.fromisoformat(m["time"]))
+    for name in MAIN_MEALS:
+        mine = [m for m in of_day if slot(m) == name]
+        if not mine:
+            out.append(f"aucune trace du {name}")
+        elif all(m["text"].startswith("rien (") for m in mine):
+            out.append(f"{name} sauté")
+        elif (kcal := sum(m.get("kcal") or 0 for m in mine)) and kcal < LIGHT_MAIN_MEAL_KCAL:
+            out.append(f"{name} très léger (~{kcal:.0f} kcal)")
+    t = day_totals(meals, day)
+    needs, running = day_needs(profile, runs, day)
+    if needs and t["meals"] >= 2:
+        ratio = t["kcal"] / needs
+        if ratio < LOW_INTAKE:
+            out.append(f"apports bas : ~{t['kcal']:.0f} kcal pour ~{needs:.0f} de besoins (déficit ~{needs - t['kcal']:.0f})")
+        elif ratio > HIGH_INTAKE:
+            out.append(f"apports inhabituellement hauts : ~{t['kcal']:.0f} kcal pour ~{needs:.0f} de besoins")
+    w = profile.get("weight_kg")
+    if w and t["meals"] >= 2:
+        w = float(w)
+        if t["protein_g"] / w < LOW_PROTEIN_G_PER_KG:
+            out.append(f"protéines basses : {t['protein_g']:.0f} g ({t['protein_g'] / w:.1f} g/kg)")
+        if running and t["carbs_g"] / w < LOW_CARBS_G_PER_KG_RUN_DAY:
+            out.append(f"jour de course avec peu de glucides : {t['carbs_g']:.0f} g ({t['carbs_g'] / w:.1f} g/kg)")
+    return out

@@ -12,7 +12,7 @@ from telegram.constants import ChatAction, ParseMode
 from telegram.error import BadRequest
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
-from . import agent, coaching, commands, dreeve, voice, weather, weather_alerts
+from . import agent, coaching, commands, dreeve, nutrition, voice, weather, weather_alerts
 from . import calendar_store as cs
 from .config import TZ, settings
 from .formatting import bubbles, md_escape, md_unescape, split_message
@@ -818,6 +818,26 @@ class CoachBot:
             logger.exception("Bilan hebdo en échec")
             reply = agent.AgentReply(f"❌ Bilan de la semaine impossible : {type(e).__name__}")
         await self._deliver(reply, header="📊 *Bilan de la semaine*")
+
+    async def check_nutrition(self) -> None:
+        """Le soir (NUTRITION_CHECK_TIME) : si la journée manque de quelque chose (repas sauté ou sans trace, apports trop
+        bas ou trop hauts, protéines ou glucides bas), un mot bienveillant ; rien si tout va bien ou si rien n'est noté."""
+        today = datetime.datetime.now(TZ).date()
+        key = f"{today.isoformat()} nutrition"
+        try:
+            if store.meal_check(key):
+                return
+            runs = await asyncio.to_thread(dreeve.get_all_runs) if settings.dreeve_enabled else []
+            issues = nutrition.anomalies(store.meals_since(today), runs, store.profile, today)
+            store.set_meal_check(key, "checked")
+            if not issues:
+                return
+            logger.info(f"Contrôle nutrition : {issues}")
+            reply = await asyncio.wait_for(agent.ask(commands.NUTRITION_CHECK_PROMPT.format(issues=" ; ".join(issues)),
+                                                     chat_id=self.chat_id, allow_writes=False), DEBRIEF_TIMEOUT_S)
+            await self._deliver(reply)
+        except Exception:
+            logger.exception("Contrôle nutrition en échec")
 
     async def new_dish(self) -> None:
         """Une fois par semaine (NEW_DISH_TIME) : un plat nouveau à découvrir, choisi pour casser la monotonie."""

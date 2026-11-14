@@ -1440,3 +1440,25 @@ def test_meal_suggestion_is_about_the_meal_coming_now():
     morning = commands.eat_prompt(at(7, 0), spontaneous=True)
     assert "Le repas concerné est le petit-déjeuner (ce matin)" in morning and "Pour ce matin" in morning
     assert "jamais pour un repas suivant" in morning and "ce midi" not in morning
+
+
+def test_evening_nutrition_check_sends_once_only_when_something_is_off(tmp_path, monkeypatch):
+    b, store = _bot(tmp_path, monkeypatch)
+    asked = []
+
+    async def fake_ask(prompt, chat_id, allow_writes=True, planning=False, skip_marker=None):
+        asked.append(prompt)
+        return agent.AgentReply("Demain, un vrai petit-déj 🥣")
+
+    monkeypatch.setattr(bot_module.agent, "ask", fake_ask)
+    monkeypatch.setattr(bot_module.dreeve, "get_all_runs", lambda: [])
+    _at(monkeypatch, 21, 45, day=14)
+    asyncio.run(b.check_nutrition())                                          # nothing logged: quiet
+    assert not asked
+    store.state["meal_checks"].clear()
+    store.log_meal("Pâtes", datetime.datetime(2026, 11, 14, 20, 0, tzinfo=bot_module.TZ), kcal=700)
+    asyncio.run(b.check_nutrition())
+    assert "aucune trace du petit-déjeuner" in asked[-1] and "culpabiliser" in asked[-1]
+    assert b.sent[-1][0].strip() == "Demain, un vrai petit-déj 🥣"
+    asyncio.run(b.check_nutrition())                                          # once a day
+    assert len(asked) == 1

@@ -64,7 +64,7 @@ HELP_TEXT = """🏃 *Salut, c'est __BOT_NAME__* 🤖
 
 Tu peux aussi m'envoyer des *vocaux* 🎙️. Quand je propose un changement, des boutons te permettent de l'appliquer.
 
-_Automatique : débrief et ressenti après chaque run, briefing chaque matin, bilan le dimanche soir, alerte météo (pluie, chaleur, vent, verglas) sur tes séances, « encore là ? » sur les produits frais du stock, des idées de plats avant les repas, « tu as mangé quoi ? » quand je n'ai aucune trace d'un repas, et un plat nouveau à découvrir chaque semaine._""".replace("__BOT_NAME__", settings.bot_name)
+_Automatique : débrief et ressenti après chaque run, briefing chaque matin, bilan le dimanche soir, alerte météo (pluie, chaleur, vent, verglas) sur tes séances, « encore là ? » sur les produits frais du stock, des idées de plats avant les repas, « tu as mangé quoi ? » quand je n'ai aucune trace d'un repas, un mot le soir si ta journée manque de quelque chose, et un plat nouveau à découvrir chaque semaine._""".replace("__BOT_NAME__", settings.bot_name)
 
 
 def parse_days(args: list[str], default: int = AGENDA_DEFAULT_DAYS, maximum: int = AGENDA_MAX_DAYS) -> int:
@@ -196,6 +196,15 @@ MEME_PROMPT = (
     "pluie, jambes en bois, repos assumé, gros repas, séance sautée…), appelle send_gif avec 2 à 4 mots-clés en "
     "anglais qui collent pile à ma journée, et écris UNE seule ligne drôle pour l'accompagner, comme un pote. "
     "Ne modifie rien."
+)
+
+NUTRITION_CHECK_PROMPT = (
+    "[Contrôle nutrition du soir] Le système a relevé ceci dans ma journée : {issues}.\n"
+    "Écris-moi comme un pote qui me soutient : 1 ou 2 messages très courts, bienveillants, sans culpabiliser ni faire "
+    "la leçon. Le point le plus important seulement, et une idée concrète et simple pour faire mieux demain (petit-déj, "
+    "collation…), si possible avec ce que j'ai en stock. Garde en tête le long terme : c'est la tendance qui compte. "
+    "Si un repas n'a « aucune trace », demande-moi simplement ce que j'ai mangé plutôt que de supposer que je l'ai "
+    "sauté. Ne modifie rien."
 )
 
 NEW_DISH_PROMPT = (

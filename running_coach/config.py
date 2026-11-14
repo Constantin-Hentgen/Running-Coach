@@ -167,6 +167,7 @@ class Settings:
     pantry_check_time: tuple[int, int] | None
     shop_last_call: tuple[int, int] | None
     bot_name: str
+    nutrition_check_time: tuple[int, int] | None
     meal_check_times: list[tuple[int, int]]
     eat_suggest_times: list[tuple[int, int]]
     meal_boxes: int
@@ -219,6 +220,7 @@ class Settings:
             new_dish_time=_weekly_time(_str("NEW_DISH_TIME", "sat 10:00"), "NEW_DISH_TIME"),
             pantry_check_time=_briefing_time(_str("PANTRY_CHECK_TIME", "18:00"), "PANTRY_CHECK_TIME"),
             shop_last_call=_briefing_time(_str("SHOP_LAST_CALL", "19:30"), "SHOP_LAST_CALL"),
+            nutrition_check_time=_briefing_time(_str("NUTRITION_CHECK_TIME", "21:45"), "NUTRITION_CHECK_TIME"),
             bot_name=" ".join((_str("BOT_NAME", "Bob") or "Bob").split())[:32] or "Bob",
             meal_check_times=_meal_times(_str("MEAL_CHECK_TIMES", "10:30,14:30,21:30")),
             eat_suggest_times=_meal_times(_str("EAT_SUGGEST_TIMES", "07:00,11:30,18:30"), "EAT_SUGGEST_TIMES"),
