@@ -10,6 +10,7 @@ from .. import agent, coaching, dreeve, weather, weather_alerts
 from .. import calendar_store as cs
 from ..config import TZ, settings
 from ..memory import store
+from ..i18n import _
 
 logger = logging.getLogger(__name__)
 
@@ -47,16 +48,16 @@ class JobsMixin:
         try:
             prompt = await asyncio.to_thread(self._review_prompt)
         except Exception as e:
-            await update.message.reply_text(f"❌ Bilan impossible : {e}")
+            await update.message.reply_text(_("❌ Bilan impossible : {error}").format(error=e))
             return
-        await self._ask_and_reply(update, prompt, allow_writes=False, planning=True, header="📊 *Bilan de la semaine*")
+        await self._ask_and_reply(update, prompt, allow_writes=False, planning=True, header=_("📊 *Bilan de la semaine*"))
 
     async def morning_briefing(self) -> None:
         try:
             reply = await agent.ask(MORNING_PROMPT, chat_id=self.chat_id)
         except Exception as e:
             logger.exception("Briefing matinal en échec")
-            reply = agent.AgentReply(f"❌ Briefing matinal impossible : {type(e).__name__}")
+            reply = agent.AgentReply(_("❌ Briefing matinal impossible : {error}").format(error=type(e).__name__))
         await self._deliver(reply)
 
     def _review_prompt(self) -> str:
@@ -64,7 +65,7 @@ class JobsMixin:
         today = datetime.datetime.now(TZ).date()
         monday, sunday = coaching.week_bounds(today)
         start = datetime.datetime.combine(monday, datetime.time.min, tzinfo=TZ)
-        events, _ = cs.list_events(start, start + datetime.timedelta(days=7))
+        events, __ = cs.list_events(start, start + datetime.timedelta(days=7))
         planned = [ev for ev in events if weather_alerts.is_training(
             ev, datetime.datetime.fromisoformat(ev["start"]), datetime.datetime.fromisoformat(ev["end"]))]
         runs = dreeve.get_runs_since_weeks(1)[0] if settings.dreeve_enabled else []
@@ -77,8 +78,8 @@ class JobsMixin:
             reply = await agent.ask(prompt, chat_id=self.chat_id, allow_writes=False, planning=True)
         except Exception as e:
             logger.exception("Bilan hebdo en échec")
-            reply = agent.AgentReply(f"❌ Bilan de la semaine impossible : {type(e).__name__}")
-        await self._deliver(reply, header="📊 *Bilan de la semaine*")
+            reply = agent.AgentReply(_("❌ Bilan de la semaine impossible : {error}").format(error=type(e).__name__))
+        await self._deliver(reply, header=_("📊 *Bilan de la semaine*"))
 
     async def check_weather(self) -> None:
         """Prévient (une fois par risque et par séance) en cas de pluie, chaleur, vent ou verglas, et quand ça s'arrange."""
@@ -86,7 +87,7 @@ class JobsMixin:
             now = datetime.datetime.now(TZ)
             horizon = now + datetime.timedelta(hours=settings.rain_hours_ahead)
             days = min(16, (settings.rain_hours_ahead + now.hour) // 24 + 2)
-            (events, _), forecasts = await asyncio.gather(
+            (events, __), forecasts = await asyncio.gather(
                 asyncio.to_thread(cs.list_events, now, horizon + datetime.timedelta(hours=6)),
                 asyncio.to_thread(weather.fetch_hourly, days),
             )
@@ -98,8 +99,8 @@ class JobsMixin:
             markup = None
             if notice.kind == "alert":
                 pid = store.add_proposal(weather_alerts.adapt_prompt(notice), kind="weather")
-                markup = InlineKeyboardMarkup([[InlineKeyboardButton("🔁 Adapter", callback_data=f"p:a:{pid}"),
-                                                InlineKeyboardButton("👍 Je garde", callback_data=f"p:x:{pid}")]])
+                markup = InlineKeyboardMarkup([[InlineKeyboardButton(_("🔁 Adapter"), callback_data=f"p:a:{pid}"),
+                                                InlineKeyboardButton(_("👍 Je garde"), callback_data=f"p:x:{pid}")]])
             try:
                 await self._push(text, markup)
             except Exception:

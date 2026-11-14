@@ -10,7 +10,8 @@ import anthropic
 
 from . import calendar_store as cs
 from . import coaching, dreeve, dreeve_mcp, nutrition, weather
-from .config import FR_DAYS_LONG, TZ, TZ_LABEL, UTC, settings
+from .config import DAYS_LONG, TZ, TZ_LABEL, UTC, settings
+from .i18n import _, language_name
 from .memory import store
 from .tools import ALL_TOOLS, GIF_ON_DEMAND, READ_ONLY_TOOLS, Ledger, build_report, run_tool
 
@@ -132,16 +133,33 @@ GIF ET MÈMES : si l'outil `send_gif` est disponible, tu peux de temps en temps 
 FORMAT TELEGRAM : texte simple de messagerie ; une liste à puces (`-`) seulement pour plusieurs séances ou plats, du gras (`*texte*`) rarement. ZÉRO TABLEAU (pas de `|`).
 """.strip().replace("__BOT_NAME__", settings.bot_name)   # BOT_NAME : le nom du personnage
 
+# BOT_LANGUAGE : les consignes restent en français (le modèle les suit très bien), seule la langue de sortie change.
+LANGUAGE_RULE = (
+    "LANGUE (IMPÉRATIF) : tu écris TOUJOURS à l'athlète en {lang}, même si ces consignes, le contexte et les données des "
+    "outils sont en français (agenda, noms d'aliments Ciqual, recettes). Les exemples entre « » sont à transposer en {lang} "
+    "naturel, avec le même ton, la même concision et le même usage des émojis (comme un pote de 25 ans). Les titres et "
+    "descriptions d'événements d'agenda que tu crées, les plats proposés, les listes de courses et les textes de "
+    "propositions sont aussi en {lang}. Exception : pour `find_food`, cherche avec le nom français de l'aliment, car la "
+    "table Ciqual est en français."
+)
+if settings.language != "fr":
+    SYSTEM_PROMPT = LANGUAGE_RULE.format(lang=language_name()) + "\n\n" + SYSTEM_PROMPT
+
 # Le modèle prétend avoir modifié l'agenda alors qu'aucun outil d'agenda n'a tourné ? On cherche une
 # affirmation (participe passé) dans une phrase qui n'est ni négative (« je n'ai rien modifié »)
 # ni une question (« le déplacer ? »). Les infinitifs (« déplacer », « ajouter ») ne comptent pas.
-CLAIM_PATTERN = re.compile(r"\b(?:supprimé|créé|planifié|modifié|mis à jour|déplacé|ajouté|réorganisé|remplacé)(?:e?s?)\b", re.I)
-NEGATION = re.compile(r"\b(?:n['’]|ne|pas|rien|aucun|aucune|jamais)\b|\bn['’]", re.I)
+# Français et anglais (BOT_LANGUAGE) : les deux listes sont actives quelle que soit la langue.
+CLAIM_PATTERN = re.compile(r"\b(?:supprimé|créé|planifié|modifié|mis à jour|déplacé|ajouté|réorganisé|remplacé)(?:e?s?)\b"
+                           r"|\b(?:deleted|removed|created|added|scheduled|planned|moved|updated|changed|rescheduled|replaced|"
+                           r"booked|cancell?ed)\b", re.I)
+NEGATION = re.compile(r"\b(?:n['’]|ne|pas|rien|aucun|aucune|jamais)\b|\bn['’]"
+                      r"|\b(?:not|no|never|nothing|didn['’]t|haven['’]t|hasn['’]t|couldn['’]t|can['’]t|won['’]t)\b", re.I)
 
 
 # Le modèle annonce une proposition à valider (« boutons ci-dessous », « clique sur Appliquer ») sans l'avoir enregistrée.
 # « Appliquer » avec majuscule = le nom du bouton (pas « je peux l'appliquer »).
-ANNOUNCES_PROPOSAL = re.compile(r"\bAppliquer\b|\b[Bb]outons?\b|[Pp]ropositions? (?:est |sont )?(?:ci-dessous|sous ce message)")
+ANNOUNCES_PROPOSAL = re.compile(r"\bAppliquer\b|\b[Bb]outons?\b|[Pp]ropositions? (?:est |sont )?(?:ci-dessous|sous ce message)"
+                                r"|\b[Bb]uttons?\b|[Pp]roposals? (?:is |are )?(?:below|under this message)")
 MISSING_PROPOSAL_NUDGE = (
     "[Système] Ta réponse annonce une proposition à valider, mais tu n'as pas appelé propose_change : l'athlète ne "
     "voit aucun bouton. Appelle propose_change maintenant pour chaque proposition, puis redonne ta réponse complète. "
@@ -233,8 +251,9 @@ def history_note(ledger: Ledger, truncated: bool, error: str | None) -> str:
 # Vocabulaire d'agenda : une phrase qui parle de stock, de repas ou de courses (alimentaires) n'est pas une promesse d'agenda.
 CALENDAR_WORDS = re.compile(
     r"\b(?:agenda|calendrier|séances?|sorties?|footing|fractionné|entra[iî]nements?|renfo|renforcement|runs?|"
-    r"course à pied|seuil|allure spécifique)\b", re.I)
-GROCERY_COURSES = re.compile(r"\b(?:liste de courses|faire les courses|les courses|de courses)\b", re.I)
+    r"course à pied|seuil|allure spécifique|calendar|sessions?|workouts?|training|tempo|intervals|long run)\b", re.I)
+GROCERY_COURSES = re.compile(r"\b(?:liste de courses|faire les courses|les courses|de courses|shopping list|groceries|grocery)\b",
+                             re.I)
 
 
 def claims_calendar_change(text: str) -> bool:
@@ -317,7 +336,7 @@ async def _gather_context() -> str:
     now = datetime.datetime.now(TZ)
     return (
         "DONNÉES EN TEMPS RÉEL DU SYSTÈME :\n"
-        f"- Date et heure actuelles : {FR_DAYS_LONG[now.weekday()]} {now:%d/%m/%Y %H:%M} ({TZ_LABEL})\n"
+        f"- Date et heure actuelles : {DAYS_LONG[now.weekday()]} {now:%d/%m/%Y %H:%M} ({TZ_LABEL})\n"
         f"- Objectifs (compte à rebours) :\n{coaching.goals_context(store.goals, now.date())}\n"
         f"- Ressentis après séance (14 derniers jours) :\n{coaching.checkins_context(store.recent_checkins(14, now.date()))}\n"
         f"- Stock en cuisine :\n{coaching.pantry_context(store.pantry, now.date())}\n"
@@ -348,7 +367,7 @@ async def _run_loop(messages: list, tools: list, ledger: Ledger, model: str) -> 
     usage = {"in": 0, "cache_read": 0, "cache_write": 0, "out": 0}
     try:
         async with dreeve_mcp.McpRun() as mcp:
-            for _ in range(settings.max_tool_rounds):
+            for __ in range(settings.max_tool_rounds):
                 response = await _client.messages.create(
                     model=model,
                     max_tokens=settings.max_output_tokens,
@@ -471,9 +490,9 @@ async def ask(user_prompt: str, chat_id: str = "default", allow_writes: bool = T
         calendar_actions = [a for a in ledger.actions if a.kind in ("create", "update", "delete")]
         proposals = [(int(a.detail), a.label) for a in ledger.actions if a.kind == "proposal"]
         if not calendar_actions and not proposals and claims_calendar_change(reply):   # vocabulaire d'agenda exigé
-            reply += "\n\n⚠️ Attention, en vrai rien n'a changé dans ton agenda."
+            reply += "\n\n" + _("⚠️ Attention, en vrai rien n'a changé dans ton agenda.")
         elif not reply and not ledger.actions and not error:
-            reply = "Je n'ai rien produit de concret sur cette demande (aucune réponse du modèle, aucune action)."
+            reply = _("Je n'ai rien produit de concret sur cette demande (aucune réponse du modèle, aucune action).")
 
         reply = strip_echoed_report(reply)
         report = build_report(ledger, truncated, error)

@@ -8,9 +8,10 @@ from telegram import BotCommand
 
 from . import nutrition
 from .coaching import format_goals, format_pantry
-from .config import FR_DAYS, settings
+from .config import DAYS, settings
 from .dreeve import format_activity, weekly_volume
 from .formatting import md_escape
+from .i18n import _, decimal, plural
 
 AGENDA_DEFAULT_DAYS = 7
 AGENDA_MAX_DAYS = 45
@@ -19,30 +20,30 @@ SHOPPING_MAX_DAYS = 14   # au-delà, les produits frais ne tiennent pas
 
 # (commande principale, alias, description du menu « / » de Telegram)
 COMMANDS = [
-    ("plan", [], "Séances prévues (7 jours, ou /plan 14)"),
-    ("load", [], "Charge d'entraînement et volume récent"),
-    ("runs", [], "Tes derniers runs"),
-    ("weather", [], "Prévisions par lieu d'entraînement"),
-    ("goals", [], "Tes objectifs et le compte à rebours"),
-    ("memory", [], "Ce que le coach sait de toi"),
-    ("debrief", [], "Débrief IA de ton dernier run"),
-    ("review", [], "Bilan IA de la semaine (prévu vs fait)"),
-    ("shopping", [], "Liste de courses selon tes objectifs (7 j, ou /shopping 3)"),
-    ("list", [], "Ta liste de courses en cours, à cocher"),
-    ("recipes", [], "Recettes en boîtes pour ta liste de courses"),
-    ("eat", [], "Quoi manger maintenant (stock, heure, entraînement)"),
-    ("stock", [], "Ce que tu as en cuisine"),
-    ("nutrition", ["nutri"], "Ce que tu as mangé : calories, macros, bilan du jour et de la semaine"),
-    ("routes", ["parcours"], "2-3 boucles de course autour de chez toi ou du boulot (carte + GPX)"),
-    ("newroute", [], "Une boucle jamais courue : distance, route/nature/mixte, lieu (carte + GPX)"),
-    ("meme", [], "Un mème qui résume ta journée d'entraînement"),
-    ("briefing", [], "Briefing IA complet et ajustement du programme"),
-    ("help", ["start"], "Liste des commandes"),
+    ("plan", [], _("Séances prévues (7 jours, ou /plan 14)")),
+    ("load", [], _("Charge d'entraînement et volume récent")),
+    ("runs", [], _("Tes derniers runs")),
+    ("weather", [], _("Prévisions par lieu d'entraînement")),
+    ("goals", [], _("Tes objectifs et le compte à rebours")),
+    ("memory", [], _("Ce que le coach sait de toi")),
+    ("debrief", [], _("Débrief IA de ton dernier run")),
+    ("review", [], _("Bilan IA de la semaine (prévu vs fait)")),
+    ("shopping", [], _("Liste de courses selon tes objectifs (7 j, ou /shopping 3)")),
+    ("list", [], _("Ta liste de courses en cours, à cocher")),
+    ("recipes", [], _("Recettes en boîtes pour ta liste de courses")),
+    ("eat", [], _("Quoi manger maintenant (stock, heure, entraînement)")),
+    ("stock", [], _("Ce que tu as en cuisine")),
+    ("nutrition", ["nutri"], _("Ce que tu as mangé : calories, macros, bilan du jour et de la semaine")),
+    ("routes", ["parcours"], _("2-3 boucles de course autour de chez toi ou du boulot (carte + GPX)")),
+    ("newroute", [], _("Une boucle jamais courue : distance, route/nature/mixte, lieu (carte + GPX)")),
+    ("meme", [], _("Un mème qui résume ta journée d'entraînement")),
+    ("briefing", [], _("Briefing IA complet et ajustement du programme")),
+    ("help", ["start"], _("Liste des commandes")),
 ]
 
-BOT_COMMANDS = [BotCommand(name, desc) for name, _, desc in COMMANDS]
+BOT_COMMANDS = [BotCommand(name, desc) for name, __, desc in COMMANDS]
 
-HELP_TEXT = """🏃 *Salut, c'est __BOT_NAME__* 🤖
+HELP_TEXT = _("""🏃 *Salut, c'est __BOT_NAME__* 🤖
 Écris-moi simplement : « décale ma sortie de samedi », « je suis crevé, allège demain », « planifie ma semaine »…
 
 *Infos instantanées* (sans IA, gratuites)
@@ -71,7 +72,7 @@ HELP_TEXT = """🏃 *Salut, c'est __BOT_NAME__* 🤖
 
 Tu peux aussi m'envoyer des *vocaux* 🎙️. Quand je propose un changement, des boutons te permettent de l'appliquer.
 
-_Automatique : débrief et ressenti après chaque run, briefing chaque matin, bilan le dimanche soir, alerte météo (pluie, chaleur, vent, verglas) sur tes séances, « encore là ? » sur les produits frais du stock, des idées de plats avant les repas, « tu as mangé quoi ? » quand je n'ai aucune trace d'un repas, un mot le soir si ta journée manque de quelque chose, et un plat nouveau à découvrir chaque semaine._""".replace("__BOT_NAME__", settings.bot_name)
+_Automatique : débrief et ressenti après chaque run, briefing chaque matin, bilan le dimanche soir, alerte météo (pluie, chaleur, vent, verglas) sur tes séances, « encore là ? » sur les produits frais du stock, des idées de plats avant les repas, « tu as mangé quoi ? » quand je n'ai aucune trace d'un repas, ton bilan nutrition chaque soir, et un plat nouveau à découvrir chaque semaine._""").replace("__BOT_NAME__", settings.bot_name)
 
 
 def parse_days(args: list[str], default: int = AGENDA_DEFAULT_DAYS, maximum: int = AGENDA_MAX_DAYS) -> int:
@@ -91,7 +92,8 @@ KM_IN_TITLE = re.compile(r"(\d+(?:[.,]\d+)?)\s*km", re.I)
 SURFACE_WORDS = {"route": "route", "routes": "route", "road": "route", "bitume": "route", "goudron": "route",
                  "nature": "nature", "trail": "nature", "terrain": "nature", "chemin": "nature", "chemins": "nature",
                  "sentier": "nature", "sentiers": "nature", "mixte": "mixte", "mixed": "mixte", "mix": "mixte"}
-FILLER_WORDS = {"à", "a", "au", "aux", "en", "de", "du", "des", "vers", "près", "pres", "depuis", "autour", "dans", "sur"}
+FILLER_WORDS = {"à", "a", "au", "aux", "en", "de", "du", "des", "vers", "près", "pres", "depuis", "autour", "dans", "sur",
+                "at", "near", "around", "in", "from", "to", "the"}
 
 
 @dataclass
@@ -166,22 +168,25 @@ def route_request(args: list[str], places: list[tuple[str, float, float]], today
 
 
 def _n(x: float) -> str:
-    return f"{x:,.0f}".replace(",", " ")
+    """Nombre entier avec séparateur de milliers de la langue (« 2 328 » / « 2,328 »)."""
+    return f"{x:,.0f}".replace(",", " ") if settings.language == "fr" else f"{x:,.0f}"
 
 
 def format_nutrition(meals: list[dict], runs: list[dict], profile: dict, today: datetime.date) -> str:
     """/nutrition : aujourd'hui, repas par repas, et les 7 derniers jours (calculé depuis Ciqual, sans IA)."""
     from . import nutrition
     t = nutrition.day_totals(meals, today)
-    lines = [f"🍽️ *Aujourd'hui* : {_n(t['kcal'])} kcal · 🥩 {t['protein_g']:.0f} g protéines · 🍚 {t['carbs_g']:.0f} g "
-             f"glucides · 🧈 {t['fat_g']:.0f} g lipides · 🥦 {t['fiber_g']:.0f} g fibres"]
+    lines = [_("🍽️ *Aujourd'hui* : {kcal} kcal · 🥩 {protein} g protéines · 🍚 {carbs} g glucides · 🧈 {fat} g lipides "
+               "· 🥦 {fiber} g fibres").format(kcal=_n(t['kcal']), protein=f"{t['protein_g']:.0f}", carbs=f"{t['carbs_g']:.0f}",
+                                             fat=f"{t['fat_g']:.0f}", fiber=f"{t['fiber_g']:.0f}")]
     needs, running = nutrition.day_needs(profile, runs, today)
     if needs:
         left = needs - t["kcal"]
-        lines.append(f"Besoins du jour ~{_n(needs)} kcal" + (f" (dont 🏃 {_n(running)})" if running else "")
-                     + (f" → encore ~{_n(left)} kcal à manger 💪" if left > 0 else " → c'est couvert 👌"))
+        lines.append(_("Besoins du jour ~{kcal} kcal").format(kcal=_n(needs))
+                     + (_(" (dont 🏃 {kcal})").format(kcal=_n(running)) if running else "")
+                     + (_(" → encore ~{kcal} kcal à manger 💪").format(kcal=_n(left)) if left > 0 else _(" → c'est couvert 👌")))
     else:
-        lines.append("_Dis-moi ton poids, ta taille, ton année de naissance et ton sexe pour que je calcule tes besoins._")
+        lines.append(_("_Dis-moi ton poids, ta taille, ton année de naissance et ton sexe pour que je calcule tes besoins._"))
     for m in [m for m in meals if m["date"] == today.isoformat()]:
         kcal = f" · {_n(m['kcal'])} kcal" if m.get("kcal") is not None else ""
         lines.append(f"- {m['time']} {md_escape(m['text'])}{kcal}")
@@ -189,20 +194,22 @@ def format_nutrition(meals: list[dict], runs: list[dict], profile: dict, today: 
     logged = [(d, nutrition.day_totals(meals, d)) for d in days]
     logged = [(d, x) for d, x in logged if x["meals"] >= 2]
     if logged:
-        avg = {k: sum(x[k] for _, x in logged) / len(logged) for k in ("kcal", "protein_g", "carbs_g", "fat_g")}
-        line = f"\n📅 *7 derniers jours* ({len(logged)} j bien notés) : {_n(avg['kcal'])} kcal/j en moyenne"
-        week_needs = [nutrition.day_needs(profile, runs, d)[0] for d, _ in logged]
+        avg = {k: sum(x[k] for __, x in logged) / len(logged) for k in ("kcal", "protein_g", "carbs_g", "fat_g")}
+        line = "\n" + _("📅 *7 derniers jours* ({days} j bien notés) : {kcal} kcal/j en moyenne").format(
+            days=len(logged), kcal=_n(avg['kcal']))
+        week_needs = [nutrition.day_needs(profile, runs, d)[0] for d, __ in logged]
         if all(week_needs):
             gap = avg["kcal"] - sum(week_needs) / len(week_needs)
-            line += f", {'déficit' if gap < 0 else 'surplus'} de ~{_n(abs(gap))} kcal/j"
+            line += (_(", déficit de ~{kcal} kcal/j") if gap < 0 else _(", surplus de ~{kcal} kcal/j")).format(kcal=_n(abs(gap)))
         if profile.get("weight_kg"):
             w = float(profile["weight_kg"])
             lo, hi = nutrition.PROTEIN_G_PER_KG
-            line += f" · protéines {avg['protein_g'] / w:.1f} g/kg (repère {lo:g}–{hi:g})"
+            line += _(" · protéines {value} g/kg (repère {low}–{high})").format(
+                value=decimal(f"{avg['protein_g'] / w:.1f}"), low=decimal(f"{lo:g}"), high=decimal(f"{hi:g}"))
         lines.append(line)
     if not any(m["date"] == today.isoformat() for m in meals) and not logged:
-        lines.append("\nRien de noté pour l'instant : dis-moi ce que tu manges, je m'occupe du reste 😉")
-    lines.append("\n_Valeurs : table Ciqual (ANSES), estimations à partir des portions._")
+        lines.append("\n" + _("Rien de noté pour l'instant : dis-moi ce que tu manges, je m'occupe du reste 😉"))
+    lines.append("\n" + _("_Valeurs : table Ciqual (ANSES), estimations à partir des portions._"))
     return "\n".join(lines)
 
 
@@ -211,26 +218,28 @@ def format_day_recap(meals: list[dict], runs: list[dict], profile: dict, day: da
     Calculé par le code (table Ciqual, besoins = métabolisme × activité + runs Dreeve), sans IA."""
     from . import nutrition
     of_day = [m for m in meals if m["date"] == day.isoformat()]
-    title = f"🌙 *Ta journée côté assiette* ({FR_DAYS[day.weekday()]} {day:%d/%m})"
+    title = _("🌙 *Ta journée côté assiette* ({day})").format(day=f"{DAYS[day.weekday()]} {day:%d/%m}")
     if not of_day:
-        return f"{title}\nRien de noté aujourd'hui 🤔 Tu as mangé quoi ? Dis-le-moi, je fais le bilan."
+        return f"{title}\n" + _("Rien de noté aujourd'hui 🤔 Tu as mangé quoi ? Dis-le-moi, je fais le bilan.")
     t = nutrition.day_totals(meals, day)
     needs, running = nutrition.day_needs(profile, runs, day)
     if needs:
-        burned = f" (dont 🏃 {_n(running)})" if running else ""
+        burned = _(" (dont 🏃 {kcal})").format(kcal=_n(running)) if running else ""
         gap = needs - t["kcal"]
-        verdict = ("objectif atteint 👌" if gap <= needs * 0.1
-                   else f"il te manque ~{_n(gap)} kcal pour couvrir ta journée 💪")
-        total = f"🔥 *{_n(t['kcal'])} kcal* sur ~{_n(needs)} de besoins{burned} → {verdict}"
+        verdict = (_("objectif atteint 👌") if gap <= needs * 0.1
+                   else _("il te manque ~{kcal} kcal pour couvrir ta journée 💪").format(kcal=_n(gap)))
+        total = _("🔥 *{kcal} kcal* sur ~{needs} de besoins{burned} → {verdict}").format(
+            kcal=_n(t['kcal']), needs=_n(needs), burned=burned, verdict=verdict)
     else:
-        total = f"🔥 *{_n(t['kcal'])} kcal* aujourd'hui"
+        total = _("🔥 *{kcal} kcal* aujourd'hui").format(kcal=_n(t['kcal']))
     lines = [title, total,
-             f"🥩 {t['protein_g']:.0f} g protéines · 🍚 {t['carbs_g']:.0f} g glucides · 🧈 {t['fat_g']:.0f} g lipides"]
+             _("🥩 {protein} g protéines · 🍚 {carbs} g glucides · 🧈 {fat} g lipides").format(
+                 protein=f"{t['protein_g']:.0f}", carbs=f"{t['carbs_g']:.0f}", fat=f"{t['fat_g']:.0f}")]
     for m in of_day:
         kcal = f" · {_n(m['kcal'])} kcal" if m.get("kcal") is not None else ""
         lines.append(f"- {m['time']} {md_escape(m['text'])}{kcal}")
     if not needs:
-        lines.append("_Donne-moi ton poids, ta taille, ton année de naissance et ton sexe pour comparer à tes besoins._")
+        lines.append(_("_Donne-moi ton poids, ta taille, ton année de naissance et ton sexe pour comparer à tes besoins._"))
     return "\n".join(lines)
 
 
@@ -255,14 +264,14 @@ def eat_prompt(now: datetime.datetime, spontaneous: bool = False) -> str:
               f"que pour ce repas, jamais pour un repas suivant.\n")
     if spontaneous:   # envoyé par le système juste avant un repas, sans demande de l'athlète
         intro = (
-            f"[Suggestion automatique avant le repas] Il est {FR_DAYS[now.weekday()]} {now:%d/%m %H:%M}, je vais bientôt "
+            f"[Suggestion automatique avant le repas] Il est {DAYS[now.weekday()]} {now:%d/%m %H:%M}, je vais bientôt "
             "manger. Si d'après ma mémoire ou l'agenda je ne mange pas chez moi à ce repas (jour de bureau le midi, "
             f"restaurant, déplacement…), réponds uniquement « {NO_SUGGESTION} » et rien d'autre. Sinon, propose-moi "
             "directement quoi manger, sans me poser de question d'abord, en commençant par une courte phrase naturelle "
             f"(« Pour {MEAL_WHEN[meal]}, je te propose : »).\n"
         ) + target
     else:
-        intro = f"Que dois-je manger maintenant ? Il est {FR_DAYS[now.weekday()]} {now:%d/%m %H:%M}.\n" + target
+        intro = f"Que dois-je manger maintenant ? Il est {DAYS[now.weekday()]} {now:%d/%m %H:%M}.\n" + target
     return (
         intro +
         "Déduis-le de mon stock (contexte), de l'heure (petit-déjeuner, déjeuner, collation, dîner), de mon entraînement "
@@ -356,18 +365,18 @@ def recipes_prompt(lst: dict) -> str:
 
 def format_stock_reply(pantry: list[dict], today: datetime.date) -> str:
     if not pantry:
-        return ("🥫 *Stock*\nRien d'enregistré. Coche les articles de ta liste de courses quand tu les achètes, ou "
-                "dis-moi ce que tu as (« j'ai du riz, des œufs et du thon »).")
-    return ("🥫 *Stock* (" + str(len(pantry)) + " articles)\n" + md_escape(format_pantry(pantry, today))
-            + "\n\n_Pour corriger : « j'ai fini le riz », « il reste 2 œufs », « j'ai acheté du pain »._")
+        return _("🥫 *Stock*\nRien d'enregistré. Coche les articles de ta liste de courses quand tu les achètes, ou "
+                 "dis-moi ce que tu as (« j'ai du riz, des œufs et du thon »).")
+    return (_("🥫 *Stock* ({count} articles)").format(count=len(pantry)) + "\n" + md_escape(format_pantry(pantry, today))
+            + "\n\n" + _("_Pour corriger : « j'ai fini le riz », « il reste 2 œufs », « j'ai acheté du pain »._"))
 
 
 def format_goals_reply(goals: list[dict], today: datetime.date) -> str:
     if not goals:
-        return ("🎯 *Objectifs*\nAucun objectif enregistré. Dis-moi simplement ta prochaine course (date, distance, chrono "
-                "visé) ou un objectif santé, je l'enregistre et je construis le plan à rebours.")
-    return ("🎯 *Objectifs*\n" + md_escape(format_goals(goals, today))
-            + "\n\n_Pour modifier : « décale mon semi au 14 mars », « vise plutôt 1h50 », « j'abandonne le trail »._")
+        return _("🎯 *Objectifs*\nAucun objectif enregistré. Dis-moi simplement ta prochaine course (date, distance, chrono "
+                 "visé) ou un objectif santé, je l'enregistre et je construis le plan à rebours.")
+    return (_("🎯 *Objectifs*") + "\n" + md_escape(format_goals(goals, today))
+            + "\n\n" + _("_Pour modifier : « décale mon semi au 14 mars », « vise plutôt 1h50 », « j'abandonne le trail »._"))
 
 
 def shopping_prompt(days: int, today: datetime.date, save_to_calendar: bool = False) -> str:
@@ -400,13 +409,13 @@ def shopping_prompt(days: int, today: datetime.date, save_to_calendar: bool = Fa
 
 
 def _day_label(d: datetime.date) -> str:
-    return f"{FR_DAYS[d.weekday()]} {d:%d/%m}"
+    return f"{DAYS[d.weekday()]} {d:%d/%m}"
 
 
 def format_agenda(events: list[dict], days: int) -> str:
-    header = f"📅 *Programme, {days} prochain{'s' if days > 1 else ''} jour{'s' if days > 1 else ''}*"
+    header = (_("📅 *Programme, {days} prochains jours*") if plural(days) else _("📅 *Programme, {days} prochain jour*")).format(days=days)
     if not events:
-        return f"{header}\nRien de prévu. Demande-moi de planifier, ou lance /briefing."
+        return f"{header}\n" + _("Rien de prévu. Demande-moi de planifier, ou lance /briefing.")
 
     def day_of(ev):
         return datetime.datetime.fromisoformat(ev["start"]).date()
@@ -416,45 +425,47 @@ def format_agenda(events: list[dict], days: int) -> str:
         lines.append(f"\n*{_day_label(day)}*")
         for ev in group:
             if ev.get("all_day"):
-                when = "journée"
+                when = _("journée")
             else:
                 s, e = datetime.datetime.fromisoformat(ev["start"]), datetime.datetime.fromisoformat(ev["end"])
                 when = f"{s:%H:%M}–{e:%H:%M}"
             place = f" · 📍 {md_escape(ev['location'])}" if ev.get("location") else ""
-            lines.append(f"- {when} · {md_escape(ev.get('summary') or 'Séance')}{place}")
+            lines.append(f"- {when} · {md_escape(ev.get('summary') or _('Séance'))}{place}")
     return "\n".join(lines)
 
 
 def format_form(load: dict, runs: list[dict], today: datetime.date) -> str:
     tsb, ac = load.get("tsb") or {}, load.get("acRatio") or {}
     lines = [
-        "🔋 *Forme*",
-        f"- Forme (CTL) : {load.get('ctl')}",
-        f"- Fatigue (ATL) : {load.get('atl')}",
-        f"- Fraîcheur (TSB) : {tsb.get('value')} ({md_escape(str(tsb.get('status')))})",
-        f"- Ratio aigu/chronique : {ac.get('value')} ({md_escape(str(ac.get('status')))})",
-        f"- Jours de repos sur 7 j : {load.get('restDaysLast7Days')}",
+        _("🔋 *Forme*"),
+        _("- Forme (CTL) : {value}").format(value=load.get('ctl')),
+        _("- Fatigue (ATL) : {value}").format(value=load.get('atl')),
+        _("- Fraîcheur (TSB) : {value} ({status})").format(value=tsb.get('value'), status=md_escape(str(tsb.get('status')))),
+        _("- Ratio aigu/chronique : {value} ({status})").format(value=ac.get('value'), status=md_escape(str(ac.get('status')))),
+        _("- Jours de repos sur 7 j : {days}").format(days=load.get('restDaysLast7Days')),
         "",
-        "📊 *Volume par semaine*",
+        _("📊 *Volume par semaine*"),
     ]
     for monday, km, n in reversed(weekly_volume(runs, today, 4)):
-        label = "cette semaine" if monday == today - datetime.timedelta(days=today.weekday()) else f"sem. du {monday:%d/%m}"
-        lines.append(f"- {label} : {km:.1f} km, {n} sortie{'s' if n > 1 else ''}")
+        label = (_("cette semaine") if monday == today - datetime.timedelta(days=today.weekday())
+                 else _("sem. du {date}").format(date=f"{monday:%d/%m}"))
+        lines.append((_("- {week} : {km} km, {n} sorties") if plural(n) else _("- {week} : {km} km, {n} sortie")).format(
+            week=label, km=f"{km:.1f}", n=n))
     return "\n".join(lines)
 
 
 def format_last_runs(runs: list[dict]) -> str:
     if not runs:
-        return "Aucun run trouvé dans Dreeve."
-    return "🏃 *Derniers runs*\n" + "\n".join(md_escape(format_activity(r)) for r in runs)
+        return _("Aucun run trouvé dans Dreeve.")
+    return _("🏃 *Derniers runs*") + "\n" + "\n".join(md_escape(format_activity(r)) for r in runs)
 
 
 def format_weather(forecast_text: str) -> str:
     """Remet en forme le texte de weather.get_forecast_text pour Telegram."""
-    lines = ["🌤️ *Météo*"]
+    lines = [_("🌤️ *Météo*")]
     for line in forecast_text.splitlines():
-        if line.strip().startswith("Sur tes séances"):
-            lines.append("\n🏃 *Sur tes séances* (créneau exact)")
+        if line.strip().startswith(_("Sur tes séances")):
+            lines.append("\n" + _("🏃 *Sur tes séances* (créneau exact)"))
         elif line.startswith("    "):
             lines.append(f"   • {md_escape(line.strip())}")
         elif line.startswith("  "):

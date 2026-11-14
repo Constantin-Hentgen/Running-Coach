@@ -11,7 +11,8 @@ from collections import defaultdict
 
 import requests
 
-from .config import FR_DAYS, TZ, settings
+from .config import DAYS, TZ, settings
+from .i18n import _
 
 logger = logging.getLogger(__name__)
 
@@ -73,18 +74,18 @@ def format_activity(a: dict) -> str:
     day = (a.get("startDateLocal") or "")[:10]
     try:
         d = datetime.date.fromisoformat(day)
-        day = f"{FR_DAYS[d.weekday()]} {d:%d/%m}"
+        day = f"{DAYS[d.weekday()]} {d:%d/%m}"
     except ValueError:
         pass
     parts = [f"{distance_km(a):.1f} km", _duration(a.get("movingTimeInSeconds")), _pace(a)]
     if a.get("elevationInMeter"):
         parts.append(f"D+ {a['elevationInMeter']} m")
     if a.get("averageHeartRate"):
-        parts.append(f"FC moy {a['averageHeartRate']}")
+        parts.append(_("FC moy {hr}").format(hr=a['averageHeartRate']))
     sport = "" if a.get("sportType") == "Run" else f" [{a.get('sportType')}]"
     note = " ".join(str(a.get("description") or "").split())
     note = f" « {note[:100]}{'…' if len(note) > 100 else ''} »" if note else ""
-    return f"- {day} : {a.get('name', 'Sortie')}{sport}{note} — {', '.join(parts)} (id {a.get('id')})"
+    return f"- {day} : {a.get('name') or _('Sortie')}{sport}{note} — {', '.join(parts)} (id {a.get('id')})"
 
 
 def format_load(d: dict) -> str:

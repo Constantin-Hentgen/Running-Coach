@@ -1,4 +1,5 @@
-"""Recettes de base libres : le Livre de cuisine de Wikibooks en français (CC BY-SA), via l'API MediaWiki (sans clé).
+"""Recettes de base libres : le Livre de cuisine de Wikibooks (CC BY-SA), via l'API MediaWiki (sans clé), dans la langue
+du bot (BOT_LANGUAGE) : « Livre de cuisine » de fr.wikibooks, ou « Cookbook » de en.wikibooks.
 
 Sert à ancrer les recettes de /eat dans une source ouverte : le coach s'en inspire, la simplifie et l'adapte au stock,
 puis cite le lien. Seul le nom du plat part dans la recherche.
@@ -14,18 +15,24 @@ from .config import settings
 
 logger = logging.getLogger(__name__)
 
-API_URL = "https://fr.wikibooks.org/w/api.php"
-PREFIX = "Livre de cuisine/"
+# Par langue : (site, préfixe des pages de recettes, espace de noms de recherche, pages de sommaire à écarter)
+SOURCES = {
+    "fr": ("https://fr.wikibooks.org", "Livre de cuisine/", 0,
+           re.compile(r"/(?:Liste|Recettes?\b|Catégorie|Sommaire|Index|Intersection)", re.I)),
+    "en": ("https://en.wikibooks.org", "Cookbook:", 102,
+           re.compile(r":(?:Table of Contents|Recipes\b|Cuisine\b|Ingredients\b|Equipment\b|Techniques\b)", re.I)),
+}
+SITE, PREFIX, NAMESPACE, NOT_A_RECIPE = SOURCES[settings.language]
+API_URL = f"{SITE}/w/api.php"
 USER_AGENT = "running-coach-bot/1.0 (self-hosted personal assistant)"
 MAX_RESULTS = 2
 MAX_CHARS = 1500
-# Pages de sommaire, pas des recettes
-NOT_A_RECIPE = re.compile(r"/(?:Liste|Recettes?\b|Catégorie|Sommaire|Index|Intersection)", re.I)
 CACHE_S = 24 * 3600          # une recherche par plat et par jour suffit
 BACKOFF_S = 600              # après un refus (429), on laisse Wikibooks tranquille 10 min
 _cache: dict[str, tuple[float, list[dict]]] = {}
 _blocked_until = 0.0
-STOPWORDS = {"au", "aux", "à", "la", "le", "les", "de", "des", "du", "et", "en", "avec", "sans", "d", "l", "un", "une"}
+STOPWORDS = {"au", "aux", "à", "la", "le", "les", "de", "des", "du", "et", "en", "avec", "sans", "d", "l", "un", "une",
+             "and", "with", "the", "of", "in", "a", "an", "without"}
 
 
 def _get(**params) -> dict:
@@ -36,7 +43,7 @@ def _get(**params) -> dict:
 
 
 def page_url(title: str) -> str:
-    return "https://fr.wikibooks.org/wiki/" + quote(title.replace(" ", "_"))
+    return f"{SITE}/wiki/" + quote(title.replace(" ", "_"), safe=":/")
 
 
 def search(query: str) -> list[dict]:
@@ -70,7 +77,7 @@ def _search(query: str) -> list[dict]:
                ([f"intitle:{words[0]}"] if words else []) + [query]
     titles = []
     for attempt in attempts:
-        found = _get(action="query", list="search", srsearch=attempt, srnamespace=0, srlimit=10)
+        found = _get(action="query", list="search", srsearch=attempt, srnamespace=NAMESPACE, srlimit=10)
         titles += [r["title"] for r in found.get("query", {}).get("search", [])
                    if r["title"].startswith(PREFIX) and not NOT_A_RECIPE.search(r["title"]) and r["title"] not in titles]
         if len(titles) >= MAX_RESULTS:

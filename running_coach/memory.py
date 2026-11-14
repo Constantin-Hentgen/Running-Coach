@@ -13,15 +13,16 @@ import threading
 from pathlib import Path
 
 from .config import TZ, settings
+from .i18n import _
 
 logger = logging.getLogger(__name__)
 
 CATEGORIES = ["preference", "habitude", "contrainte", "objectif", "santé", "nutrition", "équipement", "autre"]
 # Priorité d'un souvenir : 1 = règle (toujours appliquée, sauf demande explicite contraire), 2 = préférence forte
 # (appliquée sauf bonne raison, à expliquer), 3 = indication (à prendre en compte quand c'est possible).
-PRIORITIES = {1: "RÈGLES (toujours appliquées, sauf demande explicite contraire de l'athlète)",
-              2: "PRÉFÉRENCES FORTES (appliquées sauf bonne raison, à expliquer)",
-              3: "INDICATIONS (à prendre en compte quand c'est possible)"}
+PRIORITIES = {1: _("RÈGLES (toujours appliquées, sauf demande explicite contraire de l'athlète)"),
+              2: _("PRÉFÉRENCES FORTES (appliquées sauf bonne raison, à expliquer)"),
+              3: _("INDICATIONS (à prendre en compte quand c'est possible)")}
 DEFAULT_PRIORITY = 2
 MAX_ITEMS = 80
 MAX_TEXT = 300
@@ -206,7 +207,7 @@ class Store:
     def render(self) -> str:
         """Bloc texte stable pour le prompt système : par priorité (règles d'abord), puis catégorie, puis id."""
         if not self.state["memories"]:
-            return "(rien pour l'instant)"
+            return _("(rien pour l'instant)")
         order = {c: i for i, c in enumerate(CATEGORIES)}
         blocks = []
         for prio, title in PRIORITIES.items():
@@ -214,7 +215,7 @@ class Store:
                            key=lambda m: (order.get(m["category"], 99), m["id"]))
             if items:
                 blocks.append(f"{title} :\n" + "\n".join(
-                    f"- #{m['id']} [{m['category']}] {m['text']} (depuis {m['date']})" for m in items))
+                    f"- #{m['id']} [{m['category']}] {m['text']} " + _("(depuis {date})").format(date=m['date']) for m in items))
         return "\n\n".join(blocks)
 
     # --- historique & état ------------------------------------------------------

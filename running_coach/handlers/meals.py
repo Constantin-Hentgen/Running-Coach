@@ -12,6 +12,7 @@ from ..formatting import md_escape, md_unescape
 from ..memory import store
 from .ui import MEAL_SLOT_WHEN, close_meal_guesses, has_recipe, meal_guesses, meal_rows, recent_eat_options, without_button
 from .runs import DEBRIEF_TIMEOUT_S
+from ..i18n import _
 
 logger = logging.getLogger(__name__)
 
@@ -24,8 +25,8 @@ class MealsMixin:
         if not update.message or not await self._authorized(update):
             return
         if options := recent_eat_options(datetime.datetime.now(datetime.timezone.utc)):   # pas encore choisi : mêmes plats
-            rows = [*meal_rows(options), [InlineKeyboardButton("🔄 Autre chose", callback_data="e:n")]]
-            await self._push("Tes options de tout à l'heure 👇", InlineKeyboardMarkup(rows))
+            rows = [*meal_rows(options), [InlineKeyboardButton(_("🔄 Autre chose"), callback_data="e:n")]]
+            await self._push(_("Tes options de tout à l'heure 👇"), InlineKeyboardMarkup(rows))
             return
         await self._ask_and_reply(update, commands.eat_prompt(datetime.datetime.now(TZ)), allow_writes=False)
 
@@ -43,7 +44,7 @@ class MealsMixin:
         query = update.callback_query
         item = store.proposal(mid)
         if not item or item.get("kind") != "meal" or store.close_proposal(mid, "applied") is None:
-            await query.answer("Déjà noté.")
+            await query.answer(_("Déjà noté."))
             return
         logs = item.get("check") or item.get("recipe") or not item.get("makes")   # ce bouton note un repas mangé
         when = datetime.datetime.fromisoformat(item["at"]) if item.get("check") and item.get("at") else datetime.datetime.now(TZ)
@@ -62,18 +63,19 @@ class MealsMixin:
                         markup = without_button(markup, btn.callback_data)
         await query.edit_message_reply_markup(markup)
         changes = [f"−{x}" for x in r["removed"]] + r["updated"]
-        text = "Déjà noté 👌"
+        text = _("Déjà noté 👌")
         if item.get("makes") and not dup:   # boîtes pour plus tard : elles entrent au stock
             store.update_pantry(add=[{"name": item["text"], "qty": item["makes"], "keeps_days": 4, "boxes": True}])
             changes.append(f"+{item['text']} ({item['makes']})")
-            text = f"Top, {md_escape(item['makes'])} de côté pour les prochains jours 🙌"
+            text = _("Top, {boxes} de côté pour les prochains jours 🙌").format(boxes=md_escape(item['makes']))
         if (item.get("recipe") or not item.get("makes")) and not dup:   # /eat (choisi = mangé) ou plat mangé : au journal
             macros = item.get("macros") or {}
             store.log_meal(item["text"], datetime.datetime.now(TZ), source="bouton", **macros)
-            text = "Bon app' 😋" if not item.get("makes") else text
+            text = _("Bon app' 😋") if not item.get("makes") else text
         if item.get("recipe"):   # plat choisi : la recette, simplement
-            boxes = f" (et {md_escape(item['makes'])} de côté 🙌)" if item.get("makes") else ""
-            text = f"Bon choix 😋 *{md_escape(item['text'])}*{boxes}, voilà comment faire :\n\n{item['recipe']}"
+            boxes = _(" (et {boxes} de côté 🙌)").format(boxes=md_escape(item['makes'])) if item.get("makes") else ""
+            text = _("Bon choix 😋 *{dish}*{boxes}, voilà comment faire :").format(dish=md_escape(item['text']), boxes=boxes) \
+                + f"\n\n{item['recipe']}"
         await self._push(text)
         await agent.add_to_history(self.chat_id, f"[L'athlète a confirmé avoir mangé / cuisiné : {item['text']}]", md_unescape(text))
 
@@ -84,17 +86,17 @@ class MealsMixin:
         close_meal_guesses(query.message.reply_markup)
         if dup:
             await query.edit_message_reply_markup(None)
-            await self._push(f"C'était déjà noté à {dup['time']} 👌")
+            await self._push(_("C'était déjà noté à {time} 👌").format(time=dup['time']))
             return
         macros = item.get("macros") or {}
         store.log_meal(item["text"], datetime.datetime.fromisoformat(item["at"]), source="bouton", **macros)
         box = next((u for u in item.get("uses") or [] if u.get("name", "").casefold() == item["text"].casefold()), None)
         if box and box.get("qty_left"):
-            text = f"😋 Il t'en reste {md_escape(box['qty_left'])}."
+            text = _("😋 Il t'en reste {left}.").format(left=md_escape(box['qty_left']))
         elif box and r["removed"]:
-            text = "😋 C'était la dernière boîte !"
+            text = _("😋 C'était la dernière boîte !")
         else:
-            text = "Bon app' 😋"
+            text = _("Bon app' 😋")
         await query.edit_message_reply_markup(None)
         await self._push(text)
         await agent.add_to_history(self.chat_id, f"[L'athlète a répondu avoir mangé : {item['text']}]", md_unescape(text))
@@ -103,17 +105,17 @@ class MealsMixin:
         """« Qu'as-tu mangé ? » : Sauté (noté comme repas vide, à la fin de sa plage) ou Passer (on n'en parle plus)."""
         query = update.callback_query
         await query.answer()
-        _, end, slot = coaching.meal_window(settings.meal_check_times, index)
+        __, end, slot = coaching.meal_window(settings.meal_check_times, index)
         key = f"{day} {slot}"
         close_meal_guesses(query.message.reply_markup)
         if action == "s":
             at = datetime.datetime.combine(datetime.date.fromisoformat(day), end, tzinfo=TZ)
             store.log_meal(f"rien ({slot} sauté)", at, source="bouton", kcal=0, protein_g=0, carbs_g=0)
             store.set_meal_check(key, "answered")
-            text = "Ça arrive 😅 Pense à bien manger au prochain repas."
+            text = _("Ça arrive 😅 Pense à bien manger au prochain repas.")
         else:
             store.set_meal_check(key, "skipped")
-            text = "Ok 👌"
+            text = _("Ok 👌")
         await query.edit_message_reply_markup(None)
         await self._push(text)
         await agent.add_to_history(self.chat_id, f"[Réponse à « qu'as-tu mangé ? » ({slot})]", text)
@@ -193,9 +195,9 @@ class MealsMixin:
                 gid = store.add_proposal(g["text"], kind="meal", uses=g["uses"], macros=g["macros"], at=at,
                                          check=key, source=g["source"])
                 rows.append([InlineKeyboardButton(f"{'🍱' if g['box'] else '🍽️'} {g['text']}"[:60], callback_data=f"m:{gid}")])
-            hint = ("Une de tes boîtes, un plat proposé ? Touche-le, ou dis-moi ce que c'était." if rows
-                    else "Dis-le-moi en texte ou en vocal, je m'occupe du stock.")
-            text = f"🍽️ *{MEAL_SLOT_WHEN[slot]}, tu as mangé quoi ?*\n{hint}"
+            hint = (_("Une de tes boîtes, un plat proposé ? Touche-le, ou dis-moi ce que c'était.") if rows
+                    else _("Dis-le-moi en texte ou en vocal, je m'occupe du stock."))
+            text = _("🍽️ *{when}, tu as mangé quoi ?*").format(when=MEAL_SLOT_WHEN[slot]) + f"\n{hint}"
             markup = InlineKeyboardMarkup(rows) if rows else None   # jamais de bouton « sauté »
             await self._push(text, markup)
             store.set_meal_check(key, "asked")

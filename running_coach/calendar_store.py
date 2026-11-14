@@ -16,7 +16,8 @@ import caldav
 from caldav.lib.error import NotFoundError
 from icalendar import Calendar, Event
 
-from .config import FR_DAYS, TZ, UTC, settings
+from .config import DAYS, TZ, UTC, settings
+from .i18n import _
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +57,7 @@ def to_aware(value) -> datetime.datetime:
 
 def fmt_when(start: datetime.datetime, end: datetime.datetime) -> str:
     s, e = start.astimezone(TZ), end.astimezone(TZ)
-    return f"{FR_DAYS[s.weekday()]} {s:%d/%m} {s:%H:%M}–{e:%H:%M}"
+    return f"{DAYS[s.weekday()]} {s:%d/%m} {s:%H:%M}–{e:%H:%M}"
 
 
 def _close(a: datetime.datetime, b: datetime.datetime) -> bool:
@@ -290,7 +291,7 @@ def group_by_aisle(items: list[dict]) -> dict[str, list[tuple[int, dict]]]:
     """Rayon → [(index, article)], dans l'ordre d'apparition des rayons."""
     groups: dict[str, list[tuple[int, dict]]] = {}
     for i, item in enumerate(items):
-        groups.setdefault(item.get("aisle") or "🛒 Divers", []).append((i, item))
+        groups.setdefault(item.get("aisle") or _("🛒 Divers"), []).append((i, item))
     return groups
 
 
@@ -336,7 +337,7 @@ def shopping_description(lst: dict) -> str:
 def format_checklist(items: list[dict]) -> str:
     """Articles {name, qty, aisle, done} → checklist texte par rayon (✅ acheté, ☐ à acheter)."""
     return "\n\n".join(
-        f"{aisle}\n" + "\n".join(f"{'✅' if item.get('done') else '☐'} {item_label(item)}" for _, item in entries)
+        f"{aisle}\n" + "\n".join(f"{'✅' if item.get('done') else '☐'} {item_label(item)}" for __, item in entries)
         for aisle, entries in group_by_aisle(items).items())
 
 
@@ -374,7 +375,7 @@ def save_shopping_event(lst: dict, start: datetime.datetime, end: datetime.datet
     summary = f"🛒 Courses ({details})"
     get_shopping_calendar().add_event(build_event(uid, summary, start, end, shopping_description(lst)))
     try:   # relecture : l'événement doit exister avec le bon créneau avant de supprimer l'ancienne liste
-        _, comp = parse_vevent(get_shopping_calendar().get_event_by_uid(uid).data)
+        __, comp = parse_vevent(get_shopping_calendar().get_event_by_uid(uid).data)
     except Exception as e:
         raise RuntimeError(f"relecture impossible après création : {e}") from None
     c_start, c_end = event_bounds(comp)
@@ -390,6 +391,6 @@ def set_shopping_description(uid: str, description: str) -> None:
     obj = get_shopping_calendar().get_event_by_uid(uid)
     obj.data = apply_update(obj.data, description=description)
     obj.save()
-    _, comp = parse_vevent(get_shopping_calendar().get_event_by_uid(uid).data)
+    __, comp = parse_vevent(get_shopping_calendar().get_event_by_uid(uid).data)
     if _text(comp, "DESCRIPTION") != description:
         raise RuntimeError("relecture : la checklist n'a pas été mise à jour sur Radicale")

@@ -11,6 +11,7 @@ from .. import coaching
 from .. import calendar_store as cs
 from ..formatting import bubbles, md_escape, md_unescape, split_message
 from ..memory import LEGS, store
+from ..i18n import _
 
 
 def merge_messages(texts: list[str]) -> str:
@@ -20,7 +21,7 @@ def merge_messages(texts: list[str]) -> str:
             + "\n".join(f"{i}. {t}" for i, t in enumerate(texts, 1)))
 
 
-PAIN_FOLLOW_UP = "T'as mal où, et depuis quand ? Ça gêne à la marche ?"
+PAIN_FOLLOW_UP = _("T'as mal où, et depuis quand ? Ça gêne à la marche ?")
 BUBBLE_GAP_S = 1.0          # pause minimale avant chaque message suivant d'une réponse
 BUBBLE_CHARS_PER_S = 35     # « vitesse de frappe » : un message plus long se fait attendre un peu plus
 BUBBLE_MAX_GAP_S = 4.0
@@ -55,12 +56,12 @@ def proposal_bubble(summary: str) -> str:
 
 def proposal_markup(pid) -> InlineKeyboardMarkup:
     """Une proposition = une bulle à part, avec ses propres boutons : répondre à l'une ne touche pas aux autres."""
-    return InlineKeyboardMarkup([[InlineKeyboardButton("✅ Oui, vas-y", callback_data=f"p:a:{pid}"),
-                                  InlineKeyboardButton("✏️ Modifier", callback_data=f"p:e:{pid}"),
-                                  InlineKeyboardButton("❌ Non", callback_data=f"p:x:{pid}")]])
+    return InlineKeyboardMarkup([[InlineKeyboardButton(_("✅ Oui, vas-y"), callback_data=f"p:a:{pid}"),
+                                  InlineKeyboardButton(_("✏️ Modifier"), callback_data=f"p:e:{pid}"),
+                                  InlineKeyboardButton(_("❌ Non"), callback_data=f"p:x:{pid}")]])
 
 
-PROPOSAL_OUTCOME = {"a": "C'est parti 👌", "e": "Ok, dis-moi ce que tu veux changer 👂", "x": "Ok, on garde comme ça 👍"}
+PROPOSAL_OUTCOME = {"a": _("C'est parti 👌"), "e": _("Ok, dis-moi ce que tu veux changer 👂"), "x": _("Ok, on garde comme ça 👍")}
 
 
 def without_proposal(markup: InlineKeyboardMarkup | None, pid: str) -> InlineKeyboardMarkup | None:
@@ -70,8 +71,8 @@ def without_proposal(markup: InlineKeyboardMarkup | None, pid: str) -> InlineKey
     return InlineKeyboardMarkup(rows) if rows else None
 
 
-MEAL_HINT = "Touche un plat une fois mangé ou cuisiné 👇"
-CHOOSE_HINT = "Ça te dit quoi ? 👇"
+MEAL_HINT = _("Touche un plat une fois mangé ou cuisiné 👇")
+CHOOSE_HINT = _("Ça te dit quoi ? 👇")
 
 
 def has_recipe(mid) -> bool:
@@ -110,13 +111,13 @@ def recent_eat_options(now: datetime.datetime) -> list[tuple[int, str]]:
 
 
 def meal_hint(meals: list[tuple[int, str]]) -> str:
-    return CHOOSE_HINT if any(has_recipe(mid) for mid, _ in meals) else MEAL_HINT
+    return CHOOSE_HINT if any(has_recipe(mid) for mid, __ in meals) else MEAL_HINT
 
 
 MEAL_GUESS_HOURS = 36   # un plat proposé il y a plus longtemps n'est plus un candidat crédible
 MAX_BOX_GUESSES = 4    # toutes les boîtes du stock d'abord (jusqu'à 4)
 MAX_DISH_GUESSES = 2   # puis les derniers plats proposés
-MEAL_SLOT_WHEN = {"petit-déjeuner": "Ce matin", "déjeuner": "Ce midi", "collation": "Cet après-midi", "dîner": "Ce soir"}
+MEAL_SLOT_WHEN = {"petit-déjeuner": _("Ce matin"), "déjeuner": _("Ce midi"), "collation": _("Cet après-midi"), "dîner": _("Ce soir")}
 
 
 def meal_guesses(now: datetime.datetime) -> list[dict]:
@@ -166,19 +167,19 @@ def without_button(markup: InlineKeyboardMarkup | None, data: str) -> InlineKeyb
 
 def pantry_check_markup(items: list[dict]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[InlineKeyboardButton(f"✅ {p['name']}"[:40], callback_data=f"k:y:{p['id']}"),
-                                  InlineKeyboardButton("🗑️ Fini", callback_data=f"k:n:{p['id']}")] for p in items])
+                                  InlineKeyboardButton(_("🗑️ Fini"), callback_data=f"k:n:{p['id']}")] for p in items])
 
 
 def shopping_text(lst: dict) -> str:
     done = sum(i["done"] for i in lst["items"])
     total = len(lst["items"])
-    status = "tout est dans le panier 🎉" if done == total else f"{done}/{total} ✅"
-    lines = [f"🛒 *Liste de courses* — {status}"]
+    status = _("tout est dans le panier 🎉") if done == total else f"{done}/{total} ✅"
+    lines = [_("🛒 *Liste de courses* — {status}").format(status=status)]
     if summary := cs.shopping_summary_line(lst):
         lines.append(f"📆 {md_escape(summary)}")
     if lst.get("coverage"):
         lines.append(f"🍽️ {md_escape(lst['coverage'])}")
-    lines.append("_Touche un article quand il est dans le panier. Recettes : /recipes_")
+    lines.append(_("_Touche un article quand il est dans le panier. Recettes : /recipes_"))
     return "\n".join(lines)
 
 
@@ -189,7 +190,7 @@ def shopping_markup(lst: dict) -> InlineKeyboardMarkup:
         rows.append([InlineKeyboardButton(f"— {aisle} —", callback_data="s:n")])
         rows += [[InlineKeyboardButton(f"{'✅' if item['done'] else '☐'} {cs.item_label(item)}", callback_data=f"s:t:{lid}:{i}")]
                  for i, item in entries]
-    rows.append([InlineKeyboardButton("🧹 Tout décocher", callback_data=f"s:r:{lid}")])
+    rows.append([InlineKeyboardButton(_("🧹 Tout décocher"), callback_data=f"s:r:{lid}")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -198,7 +199,10 @@ def rpe_markup(activity_id) -> InlineKeyboardMarkup:
                                  for row in ((1, 2, 3, 4, 5), (6, 7, 8, 9, 10))])
 
 
+LEG_LABELS = {"fraiches": _("Fraîches"), "normales": _("Normales"), "lourdes": _("Lourdes"), "douleur": _("Douleur")}
+
+
 def legs_markup(activity_id) -> InlineKeyboardMarkup:
     icons = {"fraiches": "🟢", "normales": "🟡", "lourdes": "🟠", "douleur": "🔴"}
-    return InlineKeyboardMarkup([[InlineKeyboardButton(f"{icons[k]} {label.capitalize()}", callback_data=f"c:l:{activity_id}:{k}")
+    return InlineKeyboardMarkup([[InlineKeyboardButton(f"{icons[k]} {LEG_LABELS[k]}", callback_data=f"c:l:{activity_id}:{k}")
                                   for k, label in LEGS.items()]])

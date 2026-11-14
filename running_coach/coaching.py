@@ -3,16 +3,17 @@ résumé des ressentis après séance, bilan prévu / réalisé de la semaine.""
 import datetime
 import re
 
-from .config import FR_DAYS, TZ
+from .config import DAYS, TZ
 from .dreeve import distance_km, format_activity
 from .memory import LEGS, format_goal, sorted_goals
+from .i18n import _
 
 RPE_LABELS = {1: "très facile", 2: "facile", 3: "facile", 4: "modéré", 5: "modéré", 6: "soutenu",
               7: "difficile", 8: "très difficile", 9: "très très difficile", 10: "maximal"}
 
 
 def _day(d: datetime.date) -> str:
-    return f"{FR_DAYS[d.weekday()]} {d:%d/%m}"
+    return f"{DAYS[d.weekday()]} {d:%d/%m}"
 
 
 # ---------------------------------------------------------------------------
@@ -21,14 +22,14 @@ def _day(d: datetime.date) -> str:
 
 def countdown(goal: dict, today: datetime.date) -> str:
     if not goal.get("date"):
-        return "sans date"
+        return _("sans date")
     days = (datetime.date.fromisoformat(goal["date"]) - today).days
     if days < 0:
-        return f"passé depuis {-days} j"
+        return _("passé depuis {days} j").format(days=-days)
     if days == 0:
-        return "aujourd'hui"
+        return _("aujourd'hui")
     weeks = days // 7
-    return f"dans {days} j" + (f" (~{weeks} sem.)" if weeks >= 2 else "")
+    return _("dans {n} j").format(n=days) + (_(" (~{weeks} sem.)").format(weeks=weeks) if weeks >= 2 else "")
 
 
 def goals_context(goals: list[dict], today: datetime.date) -> str:
@@ -47,7 +48,7 @@ def format_goals(goals: list[dict], today: datetime.date) -> str:
         head = f"{icons.get(g['kind'], '🎯')} {g['title']}"
         if g.get("priority"):
             head += f" [{g['priority']}]"
-        details = [x for x in (g.get("date") and f"{g['date']}, {countdown(g, today)}", g.get("target") and f"cible {g['target']}") if x]
+        details = [x for x in (g.get("date") and f"{g['date']}, {countdown(g, today)}", g.get("target") and _("cible {target}").format(target=g['target'])) if x]
         lines.append(head + (f" : {', '.join(details)}" if details else ""))
         if g.get("notes"):
             lines.append(f"   {g['notes']}")
@@ -101,7 +102,8 @@ def shopping_context(lst: dict | None) -> str:
 # Stock en cuisine
 # ---------------------------------------------------------------------------
 
-def pantry_context(pantry: list[dict], today: datetime.date) -> str:
+def pantry_context(pantry: list[dict], today: datetime.date, compact: bool = False) -> str:
+    """compact : version /stock (« · il y a 3 j » au lieu de « — acheté il y a 3 j »)."""
     if not pantry:
         return "vide ou inconnu (demande à l'athlète ce qu'il a s'il faut cuisiner)"
     lines = []
@@ -109,7 +111,10 @@ def pantry_context(pantry: list[dict], today: datetime.date) -> str:
         age = ""
         if p.get("added"):
             days = (today - datetime.date.fromisoformat(p["added"])).days
-            age = " — acheté aujourd'hui" if days == 0 else f" — acheté il y a {days} j"
+            if compact:
+                age = _(" · aujourd'hui") if days == 0 else _(" · il y a {days} j").format(days=days)
+            else:
+                age = _(" — acheté aujourd'hui") if days == 0 else _(" — acheté il y a {days} j").format(days=days)
         lines.append(f"- {p['name']}" + (f" ({p['qty']})" if p.get("qty") else "") + age + _due_label(p, today))
     return "\n".join(lines)
 
@@ -127,7 +132,7 @@ def boxes_in_use(pantry: list[dict]) -> list[tuple[str, int]]:
 
 def boxes_context(pantry: list[dict], total: int) -> str:
     used = boxes_in_use(pantry)
-    n = sum(k for _, k in used)
+    n = sum(k for __, k in used)
     detail = f" ({', '.join(f'{name} ×{k}' for name, k in used)})" if used else ""
     return f"{n}/{total} occupées{detail} → {max(0, total - n)} libre(s)"
 
@@ -137,15 +142,15 @@ def _due_label(p: dict, today: datetime.date) -> str:
         return ""
     due = datetime.date.fromisoformat(p["due"])
     if p.get("asked"):
-        return " — à vérifier (« encore là ? » envoyé)"
+        return _(" — à vérifier (« encore là ? » envoyé)")
     if due < today:
-        return " — date dépassée"
-    return " — à consommer aujourd'hui" if due == today else f" — se garde jusqu'au {_day(due)}"
+        return _(" — date dépassée")
+    return _(" — à consommer aujourd'hui") if due == today else _(" — se garde jusqu'au {day}").format(day=_day(due))
 
 
 def format_pantry(pantry: list[dict], today: datetime.date) -> str:
     """Réponse de /stock (texte brut, à échapper par l'appelant)."""
-    return pantry_context(pantry, today).replace("— acheté", "·")
+    return pantry_context(pantry, today, compact=True)
 
 
 # ---------------------------------------------------------------------------

@@ -10,7 +10,8 @@ import logging
 
 import requests
 
-from .config import FR_DAYS, settings
+from .config import DAYS, settings
+from .i18n import _, colon
 
 logger = logging.getLogger(__name__)
 
@@ -20,14 +21,14 @@ DAILY_FIELDS = ("weathercode,temperature_2m_max,temperature_2m_min,precipitation
 
 # Codes météo WMO regroupés
 _WMO = [
-    ((0,), "☀️ dégagé"),
-    ((1, 2), "🌤️ peu nuageux"),
-    ((3,), "☁️ couvert"),
-    ((45, 48), "🌫️ brouillard"),
-    ((51, 53, 55, 56, 57), "🌦️ bruine"),
-    ((61, 63, 65, 66, 67, 80, 81, 82), "🌧️ pluie"),
-    ((71, 73, 75, 77, 85, 86), "🌨️ neige"),
-    ((95, 96, 99), "⛈️ orage"),
+    ((0,), _("☀️ dégagé")),
+    ((1, 2), _("🌤️ peu nuageux")),
+    ((3,), _("☁️ couvert")),
+    ((45, 48), _("🌫️ brouillard")),
+    ((51, 53, 55, 56, 57), _("🌦️ bruine")),
+    ((61, 63, 65, 66, 67, 80, 81, 82), _("🌧️ pluie")),
+    ((71, 73, 75, 77, 85, 86), _("🌨️ neige")),
+    ((95, 96, 99), _("⛈️ orage")),
 ]
 
 
@@ -44,8 +45,8 @@ def fetch_daily(fields: str = DAILY_FIELDS) -> list[dict]:
     res = requests.get(
         settings.weather_api_url,
         params={
-            "latitude": ",".join(str(lat) for _, lat, _ in locations),
-            "longitude": ",".join(str(lon) for _, _, lon in locations),
+            "latitude": ",".join(str(lat) for __, lat, __ in locations),
+            "longitude": ",".join(str(lon) for __, __, lon in locations),
             "daily": fields,
             "timezone": "auto",
         },
@@ -65,8 +66,8 @@ def fetch_hourly(days: int = 3) -> dict:
     res = requests.get(
         settings.weather_api_url,
         params={
-            "latitude": ",".join(str(lat) for _, lat, _ in locations),
-            "longitude": ",".join(str(lon) for _, _, lon in locations),
+            "latitude": ",".join(str(lat) for __, lat, __ in locations),
+            "longitude": ",".join(str(lon) for __, __, lon in locations),
             "hourly": "precipitation_probability,precipitation,temperature_2m,apparent_temperature,wind_gusts_10m,weathercode",
             "timezone": settings.tz.key,   # heures renvoyées dans le fuseau du coach
             "forecast_days": days,
@@ -78,7 +79,7 @@ def fetch_hourly(days: int = 3) -> dict:
     data = res.json()
     items = data if isinstance(data, list) else [data]
     out = {}
-    for (name, _, _), item in zip(locations, items):
+    for (name, __, __), item in zip(locations, items):
         h = item.get("hourly", {})
 
         def col(key, i):
@@ -123,14 +124,14 @@ def _day_summary(daily: dict, i: int, hours: list | None = None) -> str:
         values = daily.get(name) or []
         return values[i] if i < len(values) else None
 
-    rain = f"pluie {col('precipitation_sum')} mm"
+    rain = _("pluie {mm} mm").format(mm=col('precipitation_sum'))
     if col("precipitation_probability_max") is not None:
         rain += f" ({col('precipitation_probability_max')} %)"
     if hours is not None and col("time"):
         spans = rain_spans(hours, datetime.date.fromisoformat(col("time")))
-        rain += f" : {format_spans(spans)}" if spans else ", sec heure par heure"
+        rain += f" : {format_spans(spans)}" if spans else _(", sec heure par heure")
     return (f"{describe_code(col('weathercode'))}, {col('temperature_2m_min')}–{col('temperature_2m_max')}°C, "
-            f"{rain}, vent {col('windspeed_10m_max')} km/h")
+            + _("{rain}, vent {wind} km/h").format(rain=rain, wind=col('windspeed_10m_max')))
 
 
 def format_forecast(dailies: list[dict], names: list[str], hourly: dict | None = None) -> str:
@@ -138,16 +139,16 @@ def format_forecast(dailies: list[dict], names: list[str], hourly: dict | None =
     hourly (lieu → heures) : ajoute les heures de pluie de chaque jour."""
     days = next((d.get("time") for d in dailies if d.get("time")), None)
     if not days:
-        return "indisponible"
+        return _("indisponible")
     lines = []
     for i, day in enumerate(days):
         d = datetime.date.fromisoformat(day)
-        label = f"{FR_DAYS[d.weekday()]} {d:%d/%m}"
+        label = f"{DAYS[d.weekday()]} {d:%d/%m}"
         if len(dailies) == 1:
-            lines.append(f"  {label} : {_day_summary(dailies[0], i, _hours(hourly, names[0]))}")
+            lines.append("  " + colon(label, _day_summary(dailies[0], i, _hours(hourly, names[0]))))
         else:
-            lines.append(f"  {label} :")
-            lines += [f"    {name} : {_day_summary(daily, i, _hours(hourly, name))}" for name, daily in zip(names, dailies)]
+            lines.append("  " + colon(label))
+            lines += ["    " + colon(name, _day_summary(daily, i, _hours(hourly, name))) for name, daily in zip(names, dailies)]
     return "\n" + "\n".join(lines)
 
 
@@ -167,14 +168,14 @@ def forecast_text(data: tuple[list[dict], dict] | None, events: list[dict] | Non
     """Texte pour le coach et /weather : jour par jour avec les heures de pluie, puis la météo de chaque séance
     planifiée sur son créneau exact (calculée par le code)."""
     if data is None:
-        return "non configurée"
+        return _("non configurée")
     from .weather_alerts import session_lines
     dailies, hourly = data
-    names = [name for name, _, _ in settings.weather_locations]
-    text = f" (lieux : {', '.join(names)})" + format_forecast(dailies, names, hourly)
+    names = [name for name, __, __ in settings.weather_locations]
+    text = _(" (lieux : {places})").format(places=", ".join(names)) + format_forecast(dailies, names, hourly)
     sessions = session_lines(events or [], hourly, now or datetime.datetime.now(settings.tz))
     if sessions:
-        text += "\n  Sur tes séances (heure par heure, créneau exact) :\n" + "\n".join(f"    {s}" for s in sessions)
+        text += "\n  " + _("Sur tes séances (heure par heure, créneau exact) :") + "\n" + "\n".join(f"    {s}" for s in sessions)
     return text
 
 
@@ -183,4 +184,4 @@ def get_forecast_text(events: list[dict] | None = None) -> str:
         return forecast_text(fetch_forecast(), events)
     except Exception as e:
         logger.warning(f"Open-Meteo indisponible : {e}")
-        return "indisponible"
+        return _("indisponible")

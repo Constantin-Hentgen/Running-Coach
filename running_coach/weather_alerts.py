@@ -24,8 +24,9 @@ import logging
 import re
 from dataclasses import dataclass, field
 
-from .config import FR_DAYS, TZ, UTC, settings
+from .config import DAYS, TZ, UTC, settings
 from .formatting import md_escape
+from .i18n import _, colon
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,7 @@ class Hour:
 
 
 ICONS = {"pluie": "☔", "chaleur": "🥵", "vent": "💨", "verglas": "🧊"}
+HAZARD_LABELS = {"pluie": _("pluie"), "chaleur": _("chaleur"), "vent": _("vent"), "verglas": _("verglas")}   # clés : état mémorisé
 
 
 @dataclass
@@ -66,11 +68,11 @@ class Conditions:
             prob = f"{self.probability} %" if self.probability is not None else "? %"
             out["pluie"] = f"{prob}, {self.mm:.1f} mm"
         if self.feels_max is not None and self.feels_max >= settings.heat_alert_c:
-            out["chaleur"] = f"{self.feels_max:.0f}°C ressentis"
+            out["chaleur"] = _("{temp}°C ressentis").format(temp=f"{self.feels_max:.0f}")
         if self.gust_max is not None and self.gust_max >= settings.gust_alert_kmh:
-            out["vent"] = f"rafales {self.gust_max:.0f} km/h"
+            out["vent"] = _("rafales {gust} km/h").format(gust=f"{self.gust_max:.0f}")
         if self.icy:
-            out["verglas"] = f"{self.temp_min:.0f}°C, sol glissant possible"
+            out["verglas"] = _("{temp}°C, sol glissant possible").format(temp=f"{self.temp_min:.0f}")
         return out
 
 
@@ -169,35 +171,36 @@ def find_notices(events: list[dict], forecasts: dict[str, list[Hour]], now: date
 def _when(n: Notice, now: datetime.datetime | None) -> str:
     s, e = n.start.astimezone(TZ), n.end.astimezone(TZ)
     lead = f" ({lead_time(n.start, now)})" if now else ""
-    return f"{FR_DAYS[s.weekday()]} {s:%d/%m} {s:%H:%M}–{e:%H:%M}{lead}"
+    return f"{DAYS[s.weekday()]} {s:%d/%m} {s:%H:%M}–{e:%H:%M}{lead}"
 
 
 def lead_time(start: datetime.datetime, now: datetime.datetime) -> str:
     hours = int((start - now).total_seconds() // 3600)
     if hours < 1:
-        return "imminent"
-    return f"dans {hours} h" if hours < 48 else f"dans {hours // 24} j"
+        return _("imminent")
+    return _("dans {n} h").format(n=hours) if hours < 48 else _("dans {n} j").format(n=hours // 24)
 
 
 def _hazard_line(hazards: dict[str, str]) -> str:
-    return " · ".join(f"{ICONS[h]} {h} {detail}" for h, detail in hazards.items())
+    return " · ".join(f"{ICONS[h]} {HAZARD_LABELS[h]} {detail}" for h, detail in hazards.items())
 
 
 def format_notice(n: Notice, now: datetime.datetime | None = None) -> str:
     if n.kind == "clear":
-        what = ", ".join(n.cleared)
-        return (f"✅ *Bonne nouvelle* : plus de risque ({md_escape(what)}) sur ta séance « {md_escape(n.summary)} »\n"
-                f"- 📅 {_when(n, now)}\n- 📍 {md_escape(n.place)}\n_On garde le programme prévu._")
-    title = "☔ *Pluie prévue sur ta séance*" if set(n.hazards) == {"pluie"} else "⚠️ *Météo à surveiller sur ta séance*"
+        what = ", ".join(HAZARD_LABELS.get(h, h) for h in n.cleared)
+        return (_("✅ *Bonne nouvelle* : plus de risque ({what}) sur ta séance « {session} »").format(
+                    what=md_escape(what), session=md_escape(n.summary))
+                + f"\n- 📅 {_when(n, now)}\n- 📍 {md_escape(n.place)}\n" + _("_On garde le programme prévu._"))
+    title = _("☔ *Pluie prévue sur ta séance*") if set(n.hazards) == {"pluie"} else _("⚠️ *Météo à surveiller sur ta séance*")
     lines = [
-        f"{title} « {md_escape(n.summary)} »",
+        _("{title} « {session} »").format(title=title, session=md_escape(n.summary)),
         f"- 📅 {_when(n, now)}",
-        f"- 📍 {md_escape(n.place)} : {md_escape(_hazard_line(n.hazards))}",
+        "- 📍 " + colon(md_escape(n.place), md_escape(_hazard_line(n.hazards))),
     ]
     for place, hazards in n.others.items():
-        status = md_escape(_hazard_line(hazards)) if hazards else "✅ RAS, bonne alternative"
-        lines.append(f"- 📍 {md_escape(place)} : {status}")
-    lines.append("_« Adapter » : je te propose un créneau ou un lieu plus favorable. Tu peux aussi me répondre directement._")
+        status = md_escape(_hazard_line(hazards)) if hazards else _("✅ RAS, bonne alternative")
+        lines.append("- 📍 " + colon(md_escape(place), status))
+    lines.append(_("_« Adapter » : je te propose un créneau ou un lieu plus favorable. Tu peux aussi me répondre directement._"))
     return "\n".join(lines)
 
 
@@ -232,17 +235,17 @@ def session_lines(events: list[dict], forecasts: dict[str, list[Hour]], now: dat
         parts = []
         if cond.mm >= 0.1:
             prob = f"{cond.probability} %, " if cond.probability is not None else ""
-            parts.append(f"{'☔ ' if 'pluie' in hazards else ''}pluie {prob}{cond.mm:g} mm")
+            parts.append(("☔ " if "pluie" in hazards else "") + _("pluie {prob}{mm} mm").format(prob=prob, mm=f"{cond.mm:g}"))
         else:
-            parts.append("sec" + (f" (risque {cond.probability} %)" if cond.probability else ""))
+            parts.append(_("sec") + (_(" (risque {prob} %)").format(prob=cond.probability) if cond.probability else ""))
         if cond.feels_max is not None:
-            parts.append(f"ressenti {cond.feels_max:.0f}°C")
+            parts.append(_("ressenti {temp}°C").format(temp=f"{cond.feels_max:.0f}"))
         if cond.gust_max is not None:
-            parts.append(f"rafales {cond.gust_max:.0f} km/h")
+            parts.append(_("rafales {gust} km/h").format(gust=f"{cond.gust_max:.0f}"))
         others = {k: v for k, v in hazards.items() if k != "pluie"}
         if others:
             parts.append("⚠️ " + _hazard_line(others))
         s, e = start.astimezone(TZ), end.astimezone(TZ)
-        lines.append(f"{ev.get('summary') or 'Séance'} ({FR_DAYS[s.weekday()]} {s:%d/%m} {s:%H:%M}–{e:%H:%M}, {place}) : "
-                     + ", ".join(parts))
+        lines.append(colon(f"{ev.get('summary') or _('Séance')} ({DAYS[s.weekday()]} {s:%d/%m} {s:%H:%M}–{e:%H:%M}, {place})",
+                           ", ".join(parts)))
     return lines
