@@ -7,12 +7,12 @@ import datetime
 import functools
 import logging
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaDocument, InputMediaPhoto, Update
 from telegram.constants import ChatAction, ParseMode
 from telegram.error import BadRequest
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
-from . import agent, coaching, commands, dreeve, nutrition, voice, weather, weather_alerts
+from . import agent, coaching, commands, dreeve, nutrition, routes, voice, weather, weather_alerts
 from . import calendar_store as cs
 from .config import TZ, settings
 from .formatting import bubbles, md_escape, md_unescape, split_message
@@ -512,6 +512,61 @@ class CoachBot:
 
     async def on_goals(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await self._command(update, lambda: commands.format_goals_reply(store.goals, datetime.datetime.now(TZ).date()))
+
+    async def on_routes(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        await self._send_routes(update, context.args or [], never_done=False)
+
+    async def on_new_route(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        await self._send_routes(update, context.args or [], never_done=True)
+
+    async def _send_routes(self, update: Update, args: list[str], never_done: bool) -> None:
+        """Boucles autour du lieu de la séance : un album de cartes, puis un album de fichiers GPX."""
+        if not update.message or not await self._authorized(update):
+            return
+        if not settings.weather_locations:
+            await self._push("Il me faut tes lieux (WEATHER_LOCATIONS, ex. maison et travail) pour trouver des boucles 😅")
+            return
+        typing = asyncio.create_task(self._keep_typing(update))
+        try:
+            now = datetime.datetime.now(TZ)
+            day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            try:
+                events = (await asyncio.to_thread(cs.list_events, day, day + datetime.timedelta(days=1)))[0]
+            except Exception:
+                events = []
+            name, start, km = commands.route_request(args, settings.weather_locations, events)
+            runs = await asyncio.to_thread(dreeve.get_all_runs) if never_done and settings.dreeve_enabled else []
+            loops = await asyncio.to_thread(routes.find_loops, start, km, 1 if never_done else 3, runs, never_done)
+            maps = [await asyncio.to_thread(routes.to_map_png, lp, start) for lp in loops]
+        except Exception:
+            logger.exception("Boucles en échec")
+            loops = []
+        finally:
+            typing.cancel()
+        if not loops:
+            await self._push("J'ai pas réussi à tracer de boucle là, réessaie dans un moment 🥲")
+            return
+        if never_done and loops[0].novelty is not None and loops[0].novelty < routes.NEVER_DONE_MIN:
+            intro = f"Pas trouvé de boucle 100 % inédite vers {name}, voilà la plus nouvelle 👇"
+        else:
+            intro = (f"Une boucle jamais faite depuis {name} 👀" if never_done
+                     else f"{len(loops)} boucles de ~{km:g} km depuis {name} 👇").replace(".", ",")
+        await self._push(intro)
+        photos = [InputMediaPhoto(img, caption=f"{i}. {routes.describe(lp)}" + (" · © OpenStreetMap" if i == 1 else ""))
+                  for i, (lp, img) in enumerate(zip(loops, maps), 1)]
+        docs = [InputMediaDocument(routes.to_gpx(lp, f"Boucle {i} · {lp.km:.1f} km · {name}"),
+                                   filename=f"boucle-{i}-{lp.km:.1f}km.gpx".replace(".", ",", 1).replace(",gpx", ".gpx"))
+                for i, lp in enumerate(loops, 1)]
+        try:
+            if len(photos) == 1:
+                await update.message.reply_photo(maps[0], caption=photos[0].caption)
+                await update.message.reply_document(docs[0].media, filename=docs[0].filename)
+            else:
+                await update.message.reply_media_group(photos)
+                await update.message.reply_media_group(docs)
+        except Exception:
+            logger.exception("Envoi des boucles en échec")
+            await self._push("Les boucles sont prêtes mais Telegram n'a pas voulu les prendre 🥲 Réessaie ?")
 
     async def on_nutrition(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         def build() -> str:
@@ -1029,7 +1084,8 @@ def build_bot() -> CoachBot:
     bot = CoachBot(app)
     handlers = {
         "plan": bot.on_agenda, "load": bot.on_form, "runs": bot.on_last_runs, "weather": bot.on_weather,
-        "goals": bot.on_goals, "memory": bot.on_memory, "list": bot.on_list, "recipes": bot.on_recipes, "eat": bot.on_eat, "stock": bot.on_stock, "meme": bot.on_meme, "nutrition": bot.on_nutrition, "debrief": bot.on_debrief, "review": bot.on_review,
+        "goals": bot.on_goals, "memory": bot.on_memory, "list": bot.on_list, "recipes": bot.on_recipes, "eat": bot.on_eat, "stock": bot.on_stock, "meme": bot.on_meme, "nutrition": bot.on_nutrition,
+        "routes": bot.on_routes, "newroute": bot.on_new_route, "debrief": bot.on_debrief, "review": bot.on_review,
         "shopping": bot.on_shopping, "briefing": bot.on_briefing, "help": bot.on_help,
     }
     for name, aliases, _ in commands.COMMANDS:

@@ -221,6 +221,8 @@ Just talk to it (in French), for example:
 | `/review` | AI review of the current week: planned vs done, form, goals, next week |
 | `/shopping` | AI shopping list for the next 7 days (`/shopping 3` for 3, max 14), built from your sport and health goals, food preferences in memory, and the sessions planned over that period. Planned around 4–6 easy meal-prep recipes. Arrives as a Telegram checklist to tick at the store, headed by **how many days and which meals it covers** and an **estimated cost range** in euros; also saved as an event in your shopping calendar (`RADICALE_SHOPPING_URL`) at your shopping time, e.g. *« mets-la à 15h »* |
 | `/list` | Shows the current shopping checklist again (no AI) |
+| `/routes` | 2–3 running loops around today's session place (home or work, from `WEATHER_LOCATIONS`) at its distance, or `/routes travail 8`: they start and end at the place, favour footpaths, parks and quiet streets (BRouter on OpenStreetMap data), and come as an album of maps plus an album of GPX files |
+| `/newroute` | One loop you've never run: at least 80 % of it away from all your past Dreeve tracks |
 | `/nutrition` | What you ate today (meal by meal) and over 7 days: calories, protein, carbs, fat, fiber, and today's needs vs intake. Computed from the Ciqual table, no AI call |
 | `/meme` | A GIF or meme that sums up your training day (today's runs, calendar, check-ins, meals, weather), with one funny line. Needs `GIPHY_API_KEY` |
 | `/eat` | What to eat **right now** (Haiku): deduced from your kitchen stock, the time of day and your training (session just done or coming up), goals and memory. Gives the dish and why, total time, what comes from your stock and what to buy, quantities and short steps, and how many containers to make for later. Asks one or two questions first only when it really needs to. Also sent on its own just before meals (`EAT_SUGGEST_TIMES`) |
@@ -329,7 +331,8 @@ The only paid service is the Anthropic API. Conversation, debriefs and commands 
 ## 🔒 Data and privacy
 
 - **Secrets**: only in your environment (`.env` / stack variables), excluded from Git (`.gitignore`) and from the Docker image (`.dockerignore`). The code contains no key, URL or personal data.
-- **Sent to Anthropic** with each message: your message (for a voice note, its transcription: the audio itself never leaves your server), the upcoming calendar, the weather, the Dreeve data, your memory, goals and check-ins. Nothing else leaves your server.
+- **Sent to Anthropic** with each message: your message (for a voice note, its transcription: the audio itself never leaves your server), the upcoming calendar, the weather, the Dreeve data, your memory, goals and check-ins.
+- **Sent elsewhere, only for the features that need it**: `/routes` and `/newroute` send the start point (your home or work coordinates) and the loop's waypoints to [brouter.de](https://brouter.de), and fetch map tiles of that area from tile.openstreetmap.org; `/eat` sends dish names to fr.wikibooks.org; GIFs send short English keywords to GIPHY. Nothing personal is ever added to these requests.
 - **Stored locally**: memory + the last 3 exchanges in the `coach-data` volume. To wipe everything: `docker compose down -v`.
 
 ---

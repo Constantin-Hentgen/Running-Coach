@@ -1,5 +1,6 @@
 """Commandes Telegram : texte d'aide et mises en forme des réponses instantanées (sans appel au modèle)."""
 import datetime
+import re
 from itertools import groupby
 
 from telegram import BotCommand
@@ -30,6 +31,8 @@ COMMANDS = [
     ("eat", [], "Quoi manger maintenant (stock, heure, entraînement)"),
     ("stock", [], "Ce que tu as en cuisine"),
     ("nutrition", ["nutri"], "Ce que tu as mangé : calories, macros, bilan du jour et de la semaine"),
+    ("routes", ["parcours"], "2-3 boucles de course autour de chez toi ou du boulot (carte + GPX)"),
+    ("newroute", [], "Une boucle que tu n'as jamais courue (carte + GPX)"),
     ("meme", [], "Un mème qui résume ta journée d'entraînement"),
     ("briefing", [], "Briefing IA complet et ajustement du programme"),
     ("help", ["start"], "Liste des commandes"),
@@ -58,6 +61,8 @@ HELP_TEXT = """🏃 *Salut, c'est __BOT_NAME__* 🤖
 /stock — ce que tu as en cuisine : les articles cochés sur ta liste y entrent, les plats que tu marques « mangé » ou « cuisiné » en sortent, et je te demande si les produits frais sont encore là quand ils arrivent à échéance
 /briefing — briefing complet, ajuste le programme dans l'agenda
 /meme — un mème qui résume ta journée d'entraînement 😂
+/routes — 2 ou 3 boucles autour du lieu de ta séance du jour, les plus calmes et sûres (carte + fichier GPX) ; /routes travail 8 pour choisir le lieu et la distance
+/newroute — une boucle que tu n'as jamais courue
 /nutrition — ce que tu as mangé aujourd'hui et cette semaine : calories, protéines, glucides, lipides, et si tu manges assez pour ce que tu dépenses (table Ciqual)
 
 /help — cette aide
@@ -77,6 +82,32 @@ def parse_days(args: list[str], default: int = AGENDA_DEFAULT_DAYS, maximum: int
 
 
 NO_SUGGESTION = "PAS_DE_SUGGESTION"
+DEFAULT_ROUTE_KM = 6.0
+KM_IN_TITLE = re.compile(r"(\d+(?:[.,]\d+)?)\s*km", re.I)
+
+
+def route_request(args: list[str], places: list[tuple[str, float, float]], today_events: list[dict]) -> tuple:
+    """/routes [lieu] [km] → (nom du lieu, (lat, lon), km). Par défaut : le lieu et la distance de la séance du jour."""
+    by_name = {name.casefold(): (name, lat, lon) for name, lat, lon in places}
+    place, km = None, None
+    for a in args:
+        if a.casefold() in by_name:
+            place = by_name[a.casefold()]
+        else:
+            try:
+                km = float(a.replace(",", ".").lower().removesuffix("km"))
+            except ValueError:
+                pass
+    run = next((e for e in today_events if "🏃" in e.get("summary", "") or KM_IN_TITLE.search(e.get("summary", ""))), None)
+    if run:
+        if place is None and run.get("location", "").casefold() in by_name:
+            place = by_name[run["location"].casefold()]
+        if km is None and (m := KM_IN_TITLE.search(run.get("summary", ""))):
+            km = float(m.group(1).replace(",", "."))
+    if place is None and places:
+        place = places[0]
+    km = min(max(km or DEFAULT_ROUTE_KM, 2.0), 30.0)
+    return (place[0], (place[1], place[2]), km) if place else (None, None, km)
 
 
 def _n(x: float) -> str:
