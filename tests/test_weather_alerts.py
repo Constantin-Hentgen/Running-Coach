@@ -164,3 +164,45 @@ def test_alert_state_persists_purges_and_migrates_old_format(tmp_path):
     s.save_alert_state("new", future_end, ["vent", "pluie"])
     reloaded = Store(tmp_path / "s.json")
     assert reloaded.alert_state("new")["hazards"] == ["pluie", "vent"] and reloaded.alert_state("old") is None
+
+
+# --- Météo heure par heure (#41) --------------------------------------------
+
+def test_night_rain_does_not_mark_an_evening_session_wet():
+    from running_coach import weather
+    night_rain = {"Maison": hourly(10, {2, 3, 4}, mm=2.0), "Travail": hourly(10)}
+    lines = wa.session_lines([event("a", at(10, 18), at(10, 19), location="Maison")], night_rain, NOW)
+    assert len(lines) == 1 and "Maison) : sec" in lines[0] and "pluie" not in lines[0]
+    assert weather.rain_spans(night_rain["Maison"], datetime.date(2026, 11, 10)) == [(2, 5, 6.0)]
+    assert weather.format_spans([(2, 5, 6.0), (17, 18, 0.4)]) == "02h–05h (6 mm), 17h–18h (0.4 mm)"
+
+
+def test_session_lines_rain_on_the_slot_skips_rest_and_past_sessions():
+    events = [event("a", at(10, 18), at(10, 19)),                       # pluie 18-19h à la maison
+              event("b", at(10, 12), at(10, 13), summary="Repos"),       # pas une séance
+              event("c", at(10, 6), at(10, 7))]                          # déjà passée
+    lines = wa.session_lines(events, FORECASTS, NOW)
+    assert len(lines) == 1
+    assert lines[0].startswith("Footing (") and "☔ pluie 80 %, 1.2 mm" in lines[0] and lines[0].count("pluie") == 1
+
+
+def test_forecast_text_lists_rain_hours_and_sessions():
+    from running_coach import weather
+    saved = settings.weather_locations
+    object.__setattr__(settings, "weather_locations", [("Maison", 48.8, 2.3)])
+    try:
+        _check_forecast_text(weather)
+    finally:
+        object.__setattr__(settings, "weather_locations", saved)
+
+
+def _check_forecast_text(weather):
+    daily = {"time": ["2026-11-10"], "weathercode": [61], "temperature_2m_min": [4.0], "temperature_2m_max": [11.0],
+             "precipitation_sum": [2.4], "precipitation_probability_max": [80], "windspeed_10m_max": [20.0]}
+    text = weather.forecast_text(([daily], {"Maison": FORECASTS["Maison"]}),
+                                 [event("a", at(10, 18), at(10, 19))], NOW)
+    assert "pluie 2.4 mm (80 %) : 18h–20h (2.4 mm)" in text
+    assert "Sur tes séances" in text and "Footing (" in text
+    dry = weather.forecast_text(([daily], {"Maison": hourly(10)}), [], NOW)
+    assert "sec heure par heure" in dry and "Sur tes séances" not in dry
+    assert weather.forecast_text(None) == "non configurée"

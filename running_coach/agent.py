@@ -90,6 +90,7 @@ MÉTHODE POUR MODIFIER L'AGENDA :
 
 MÉTÉO :
 - Les prévisions sont données par jour et par lieu d'entraînement (ex. maison, travail). Pour chaque séance, utilise la météo du lieu où elle aura lieu, déduit de ta mémoire (jours de bureau, habitudes), et renseigne ce lieu dans le champ `location` à la création/modification : le système s'en sert pour prévenir l'athlète en cas de pluie.
+- Raisonne à l'heure, pas à la journée : chaque jour indique les heures où il pleut, et « Sur tes séances » donne la météo calculée sur le créneau exact de chaque séance planifiée. Une pluie la nuit ou tôt le matin ne gêne pas une séance du soir : ne propose pas de déplacer une séance marquée « sec » à cause du cumul de la journée. Pour choisir un nouveau créneau, vise des heures sèches.
 - Si un lieu offre clairement de meilleures conditions le même jour, tu peux le suggérer.
 
 DONNÉES DREEVE (lecture seule) :
@@ -285,7 +286,7 @@ def _system_blocks() -> list[dict]:
 async def _gather_context() -> str:
     today = datetime.datetime.now(TZ).replace(hour=0, minute=0, second=0, microsecond=0).astimezone(UTC)
     forecast, cal_result, dreeve_ctx = await asyncio.gather(
-        asyncio.to_thread(weather.get_forecast_text),
+        asyncio.to_thread(weather.fetch_forecast),
         asyncio.to_thread(cs.list_events, today, today + datetime.timedelta(days=settings.context_days_ahead)),
         asyncio.to_thread(dreeve.get_context),   # runs lus une seule fois pour le texte et le bilan nutritionnel
         return_exceptions=True,
@@ -302,7 +303,14 @@ async def _gather_context() -> str:
         agenda = (f"({settings.context_days_ahead} prochains jours, {len(events)} événements, {skipped} illisibles ignorés) avec UID :\n"
                   + json.dumps(events, ensure_ascii=False, separators=(",", ":")))
     if isinstance(forecast, Exception):
+        logger.warning(f"Open-Meteo indisponible : {forecast}")
         forecast = "indisponible"
+    else:
+        try:
+            forecast = weather.forecast_text(forecast, [] if isinstance(cal_result, Exception) else cal_result[0])
+        except Exception as e:
+            logger.warning(f"Météo illisible : {e}")
+            forecast = "indisponible"
 
     now = datetime.datetime.now(TZ)
     return (

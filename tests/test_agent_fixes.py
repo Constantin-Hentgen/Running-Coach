@@ -132,7 +132,7 @@ def test_gather_context_reads_runs_once(monkeypatch):
     monkeypatch.setattr(agent, "settings", NS(dreeve_enabled=True, context_days_ahead=7, giphy_api_key=None, meal_boxes=0))
     monkeypatch.setattr(dreeve, "get_all_runs", fake_all_runs)
     monkeypatch.setattr(dreeve, "get_load_text", lambda: "charge")
-    monkeypatch.setattr(agent.weather, "get_forecast_text", lambda: "beau")
+    monkeypatch.setattr(agent.weather, "fetch_forecast", lambda: None)
     monkeypatch.setattr(agent.cs, "list_events", lambda a, b: ([], 0))
     ctx = asyncio.run(agent._gather_context())
     assert calls["all_runs"] == 1 and "charge" in ctx

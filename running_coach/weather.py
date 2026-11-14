@@ -1,7 +1,9 @@
 """Prévisions Open-Meteo (sans clé) pour chaque lieu d'entraînement, en un seul appel.
 
 Les lieux viennent de WEATHER_LOCATIONS (ex. « Maison: 48.85, 2.35 | Travail: 48.89, 2.24 »).
-La sortie est groupée par jour, pour que le coach choisisse la météo du lieu où tombe la séance.
+La sortie est groupée par jour, pour que le coach choisisse la météo du lieu où tombe la séance. Chaque jour donne
+aussi les heures où il pleut, et chaque séance planifiée sa météo sur son créneau exact : une pluie de nuit ne
+compte pas pour une séance du soir.
 """
 import datetime
 import logging
@@ -12,6 +14,7 @@ from .config import FR_DAYS, settings
 
 logger = logging.getLogger(__name__)
 
+RAIN_HOUR_MM = 0.1   # une heure « pluvieuse » : au moins 0,1 mm
 DAILY_FIELDS = ("weathercode,temperature_2m_max,temperature_2m_min,precipitation_sum,"
                 "precipitation_probability_max,windspeed_10m_max")
 
@@ -97,7 +100,25 @@ def fetch_hourly(days: int = 3) -> dict:
     return out
 
 
-def _day_summary(daily: dict, i: int) -> str:
+def rain_spans(hours: list, day: datetime.date) -> list[tuple[int, int, float]]:
+    """Heures de pluie du jour, regroupées : [(heure de début, heure de fin exclue, mm)]."""
+    spans: list[list] = []
+    for h in sorted((h for h in hours if h.time.date() == day), key=lambda h: h.time):
+        if (h.mm or 0) < RAIN_HOUR_MM:
+            continue
+        if spans and spans[-1][1] == h.time.hour:
+            spans[-1][1] += 1
+            spans[-1][2] += h.mm
+        else:
+            spans.append([h.time.hour, h.time.hour + 1, h.mm])
+    return [(a, b, round(mm, 1)) for a, b, mm in spans]
+
+
+def format_spans(spans: list[tuple[int, int, float]]) -> str:
+    return ", ".join(f"{a:02d}h–{b:02d}h ({mm:g} mm)" for a, b, mm in spans)
+
+
+def _day_summary(daily: dict, i: int, hours: list | None = None) -> str:
     def col(name):
         values = daily.get(name) or []
         return values[i] if i < len(values) else None
@@ -105,12 +126,16 @@ def _day_summary(daily: dict, i: int) -> str:
     rain = f"pluie {col('precipitation_sum')} mm"
     if col("precipitation_probability_max") is not None:
         rain += f" ({col('precipitation_probability_max')} %)"
+    if hours is not None and col("time"):
+        spans = rain_spans(hours, datetime.date.fromisoformat(col("time")))
+        rain += f" : {format_spans(spans)}" if spans else ", sec heure par heure"
     return (f"{describe_code(col('weathercode'))}, {col('temperature_2m_min')}–{col('temperature_2m_max')}°C, "
             f"{rain}, vent {col('windspeed_10m_max')} km/h")
 
 
-def format_forecast(dailies: list[dict], names: list[str]) -> str:
-    """Groupé par jour ; une ligne par lieu (ou une seule ligne s'il n'y a qu'un lieu)."""
+def format_forecast(dailies: list[dict], names: list[str], hourly: dict | None = None) -> str:
+    """Groupé par jour ; une ligne par lieu (ou une seule ligne s'il n'y a qu'un lieu).
+    hourly (lieu → heures) : ajoute les heures de pluie de chaque jour."""
     days = next((d.get("time") for d in dailies if d.get("time")), None)
     if not days:
         return "indisponible"
@@ -119,19 +144,43 @@ def format_forecast(dailies: list[dict], names: list[str]) -> str:
         d = datetime.date.fromisoformat(day)
         label = f"{FR_DAYS[d.weekday()]} {d:%d/%m}"
         if len(dailies) == 1:
-            lines.append(f"  {label} : {_day_summary(dailies[0], i)}")
+            lines.append(f"  {label} : {_day_summary(dailies[0], i, _hours(hourly, names[0]))}")
         else:
             lines.append(f"  {label} :")
-            lines += [f"    {name} : {_day_summary(daily, i)}" for name, daily in zip(names, dailies)]
+            lines += [f"    {name} : {_day_summary(daily, i, _hours(hourly, name))}" for name, daily in zip(names, dailies)]
     return "\n" + "\n".join(lines)
 
 
-def get_forecast_text() -> str:
+def _hours(hourly: dict | None, name: str) -> list | None:
+    return None if hourly is None else hourly.get(name, [])
+
+
+def fetch_forecast() -> tuple[list[dict], dict] | None:
+    """(blocs `daily` par lieu, heures par lieu) sur 7 jours ; None si aucun lieu n'est configuré."""
     if not settings.weather_enabled:
+        return None
+    return fetch_daily(), fetch_hourly(7)
+
+
+def forecast_text(data: tuple[list[dict], dict] | None, events: list[dict] | None = None,
+                  now: datetime.datetime | None = None) -> str:
+    """Texte pour le coach et /weather : jour par jour avec les heures de pluie, puis la météo de chaque séance
+    planifiée sur son créneau exact (calculée par le code)."""
+    if data is None:
         return "non configurée"
+    from .weather_alerts import session_lines
+    dailies, hourly = data
+    names = [name for name, _, _ in settings.weather_locations]
+    text = f" (lieux : {', '.join(names)})" + format_forecast(dailies, names, hourly)
+    sessions = session_lines(events or [], hourly, now or datetime.datetime.now(settings.tz))
+    if sessions:
+        text += "\n  Sur tes séances (heure par heure, créneau exact) :\n" + "\n".join(f"    {s}" for s in sessions)
+    return text
+
+
+def get_forecast_text(events: list[dict] | None = None) -> str:
     try:
-        names = [name for name, _, _ in settings.weather_locations]
-        return f" (lieux : {', '.join(names)})" + format_forecast(fetch_daily(), names)
+        return forecast_text(fetch_forecast(), events)
     except Exception as e:
         logger.warning(f"Open-Meteo indisponible : {e}")
         return "indisponible"

@@ -370,7 +370,9 @@ def format_weather(forecast_text: str) -> str:
     """Remet en forme le texte de weather.get_forecast_text pour Telegram."""
     lines = ["🌤️ *Météo*"]
     for line in forecast_text.splitlines():
-        if line.startswith("    "):
+        if line.strip().startswith("Sur tes séances"):
+            lines.append("\n🏃 *Sur tes séances* (créneau exact)")
+        elif line.startswith("    "):
             lines.append(f"   • {md_escape(line.strip())}")
         elif line.startswith("  "):
             lines.append(f"- {md_escape(line.strip())}")

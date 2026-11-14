@@ -208,3 +208,41 @@ def adapt_prompt(n: Notice) -> str:
             f"{_hazard_line(n.hazards)}. Autres lieux sur ce créneau : {others}. "
             "Adapte-la au mieux (autre créneau proche, autre lieu, contenu ou tenue adaptés à la météo) "
             "en respectant ma mémoire et le reste de la semaine, puis dis-moi ce que tu as changé.")
+
+
+def session_lines(events: list[dict], forecasts: dict[str, list[Hour]], now: datetime.datetime) -> list[str]:
+    """Météo de chaque séance à venir sur son créneau exact, au lieu de la séance (sans appel au modèle).
+    « sec » veut dire : pas de pluie pendant la séance, même s'il pleut ailleurs dans la journée."""
+    places = list(forecasts)
+    if not places:
+        return []
+    lines = []
+    for ev in events:
+        try:
+            start, end = datetime.datetime.fromisoformat(ev["start"]), datetime.datetime.fromisoformat(ev["end"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if end <= now or not is_training(ev, start, end):
+            continue
+        place = resolve_place(ev, places)
+        cond = conditions(forecasts[place], start, end)
+        if cond is None:
+            continue   # au-delà de la prévision horaire
+        hazards = cond.hazards()
+        parts = []
+        if cond.mm >= 0.1:
+            prob = f"{cond.probability} %, " if cond.probability is not None else ""
+            parts.append(f"{'☔ ' if 'pluie' in hazards else ''}pluie {prob}{cond.mm:g} mm")
+        else:
+            parts.append("sec" + (f" (risque {cond.probability} %)" if cond.probability else ""))
+        if cond.feels_max is not None:
+            parts.append(f"ressenti {cond.feels_max:.0f}°C")
+        if cond.gust_max is not None:
+            parts.append(f"rafales {cond.gust_max:.0f} km/h")
+        others = {k: v for k, v in hazards.items() if k != "pluie"}
+        if others:
+            parts.append("⚠️ " + _hazard_line(others))
+        s, e = start.astimezone(TZ), end.astimezone(TZ)
+        lines.append(f"{ev.get('summary') or 'Séance'} ({FR_DAYS[s.weekday()]} {s:%d/%m} {s:%H:%M}–{e:%H:%M}, {place}) : "
+                     + ", ".join(parts))
+    return lines

@@ -150,4 +150,12 @@ class InfoMixin:
         await self._command(update, build)
 
     async def on_weather(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        await self._command(update, lambda: commands.format_weather(weather.get_forecast_text()))
+        def build() -> str:
+            now = datetime.datetime.now(TZ)
+            try:
+                events = cs.list_events(now, now + datetime.timedelta(days=7))[0]
+            except Exception as e:
+                logger.warning(f"/weather : agenda illisible, météo des séances omise : {e}")
+                events = []
+            return commands.format_weather(weather.get_forecast_text(events))
+        await self._command(update, build)
