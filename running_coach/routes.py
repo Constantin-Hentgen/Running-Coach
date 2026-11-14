@@ -5,7 +5,13 @@
   parcours sur des voies sûres et calmes.
 - Une boucle part du lieu, passe par deux points à distance choisie (un triangle), et revient au lieu : départ et
   arrivée au même endroit.
+- Revêtement voulu (`surface`) : « route » (bitume, voies calmes, le moins de traversées de rue possible),
+  « nature » (chemins, pistes, terre) ou « mixte ». Les boucles avec des allers-retours (demi-tours) sont écartées
+  dès qu'il existe une alternative.
+- Validées par la communauté : la part du parcours sur des sentiers balisés cartographiés dans OpenStreetMap
+  (relations route=hiking locales à internationales) donne un bonus.
 - « Jamais faite » : comparée aux tracés des runs Dreeve (polylignes encodées).
+- Lieu en texte libre (« bois de vincennes ») : géocodé avec Nominatim (OpenStreetMap), près des lieux connus.
 - Sorties : un fichier GPX et une image de carte (tuiles OpenStreetMap).
 """
 import io
@@ -34,6 +40,13 @@ BROUTER_TIMEOUT_S = 15
 GRID_DEG = 0.0003            # ~30 m : une case de la grille des endroits déjà courus
 QUIET = {"footway", "path", "pedestrian", "track", "cycleway", "living_street", "bridleway", "steps", "corridor"}
 CALM = {"residential", "service", "unclassified", "road"}
+PAVED = {"asphalt", "paved", "concrete", "concrete:plates", "concrete:lanes", "paving_stones", "sett", "cobblestone",
+         "metal", "wood", "chipseal", "unhewn_cobblestone"}
+UNPAVED_WAYS = {"path", "track", "bridleway"}   # sans tag surface : considérés comme non revêtus
+CROSSING_NODES = ("highway=crossing", "highway=traffic_signals")
+SURFACES = ("route", "nature", "mixte")
+MAX_BACKTRACK = 0.08         # au-delà : la boucle contient un aller-retour (demi-tour)
+NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 BUSY = {"primary", "primary_link", "secondary", "secondary_link", "trunk", "trunk_link", "tertiary", "tertiary_link"}
 
 
@@ -48,14 +61,28 @@ class Loop:
     novelty: float | None = None   # part du parcours jamais courue (si comparée)
     bearing: float = 0
     tags: dict = field(default_factory=dict)
+    paved: float = 1.0    # part sur bitume, pavés, béton
+    crossings: int = 0    # passages piétons et feux traversés
+    marked: float = 0.0   # part sur des sentiers balisés (OSM)
 
     @property
     def safe(self) -> float:
         return self.quiet + self.calm
 
-    def score(self, km: float) -> float:
-        """Plus c'est calme et proche de la distance voulue, mieux c'est ; les allers-retours sont pénalisés."""
-        return self.quiet + 0.6 * self.calm - 1.5 * self.busy - 2 * abs(self.km - km) / km - 0.8 * backtrack(self.points)
+    @property
+    def crossings_per_km(self) -> float:
+        return self.crossings / self.km if self.km else 0.0
+
+    def score(self, km: float, surface: str = "mixte") -> float:
+        """Proche de la distance voulue, sans aller-retour, et selon le revêtement voulu :
+        route → bitume calme avec peu de traversées ; nature → chemins et terre ; mixte → le plus calme."""
+        base = -2 * abs(self.km - km) / km - 3 * backtrack(self.points) + 0.4 * self.marked
+        if surface == "route":
+            return (base + self.paved + self.quiet + 0.6 * self.calm - 2 * self.busy
+                    - 0.06 * min(self.crossings_per_km, 15))
+        if surface == "nature":
+            return base + 1.5 * (1 - self.paved) + 0.3 * self.quiet - 1.5 * self.busy - 0.02 * min(self.crossings_per_km, 15)
+        return base + self.quiet + 0.6 * self.calm - 1.5 * self.busy
 
 
 # ---------------------------------------------------------------------------
@@ -144,16 +171,29 @@ def route(waypoints: list[tuple[float, float]]) -> Loop:
     props = feature["properties"]
     points = [(c[1], c[0], c[2] if len(c) > 2 else None) for c in feature["geometry"]["coordinates"]]
     by_class: dict[str, float] = {}
+    paved = marked = 0.0
+    crossings = 0
     header, *rows = props.get("messages") or [[]]
-    di, ti = (header.index("Distance"), header.index("WayTags")) if header else (None, None)
+    col = lambda name: header.index(name) if name in header else None   # noqa: E731
+    di, ti, ni = col("Distance"), col("WayTags"), col("NodeTags")
     for row in rows:
-        m = re.search(r"highway=(\S+)", row[ti] if ti is not None else "")
+        way = row[ti] if ti is not None else ""
+        dist = float(row[di] or 0) if di is not None else 0.0
+        m = re.search(r"highway=(\S+)", way)
         kind = m.group(1) if m else "other"
-        by_class[kind] = by_class.get(kind, 0) + float(row[di] or 0)
+        by_class[kind] = by_class.get(kind, 0) + dist
+        surf = re.search(r"surface=(\S+)", way)
+        if (surf.group(1) in PAVED) if surf else kind not in UNPAVED_WAYS:
+            paved += dist
+        if re.search(r"route_hiking_\w+=yes", way):
+            marked += dist
+        if ni is not None and any(t in (row[ni] or "").split() for t in CROSSING_NODES):
+            crossings += 1
     total = sum(by_class.values()) or 1
-    share = lambda kinds: sum(v for k, v in by_class.items() if k in kinds) / total
+    share = lambda kinds: sum(v for k, v in by_class.items() if k in kinds) / total   # noqa: E731
     return Loop(points=points, km=float(props.get("track-length") or 0) / 1000, quiet=share(QUIET), calm=share(CALM),
-                busy=share(BUSY), climb=int(float(props.get("filtered ascend") or 0)), tags=by_class)
+                busy=share(BUSY), climb=int(float(props.get("filtered ascend") or 0)), tags=by_class,
+                paved=paved / total, crossings=crossings, marked=marked / total)
 
 
 def loop_at(start: tuple[float, float], km: float, bearing: float) -> Loop:
@@ -173,9 +213,9 @@ def loop_at(start: tuple[float, float], km: float, bearing: float) -> Loop:
 
 
 def find_loops(start: tuple[float, float], km: float, count: int = 3, runs: list[dict] | None = None,
-               never_done: bool = False) -> list[Loop]:
-    """Les meilleures boucles autour de `start` : orientations différentes, les plus calmes et sûres d'abord.
-    never_done : seulement des boucles dont l'essentiel du parcours n'a jamais été couru."""
+               never_done: bool = False, surface: str = "mixte") -> list[Loop]:
+    """Les meilleures boucles autour de `start` : orientations différentes, les mieux notées pour `surface` d'abord,
+    sans aller-retour si possible. never_done : seulement des boucles dont l'essentiel n'a jamais été couru."""
     done = run_cells(runs or []) if (runs or never_done) else set()
     bearings = [i * 360 / 8 for i in range(8)] if never_done else [i * 360 / 6 for i in range(6)]
     loops = []
@@ -196,10 +236,11 @@ def find_loops(start: tuple[float, float], km: float, count: int = 3, runs: list
             continue
         loop.novelty = novelty(loop.points, done) if (done or never_done) else None   # rien couru : tout est nouveau
         loops.append(loop)
+    loops = [lp for lp in loops if backtrack(lp.points) <= MAX_BACKTRACK] or loops   # pas de demi-tour si possible
     if never_done:
         loops = [lp for lp in loops if (lp.novelty or 0) >= NEVER_DONE_MIN] or \
                 sorted(loops, key=lambda lp: lp.novelty or 0, reverse=True)[:1]
-    loops.sort(key=lambda lp: lp.score(km) + (0.5 * lp.novelty if never_done and lp.novelty else 0), reverse=True)
+    loops.sort(key=lambda lp: lp.score(km, surface) + (0.5 * lp.novelty if never_done and lp.novelty else 0), reverse=True)
     picked = []
     for lp in loops:   # des boucles vraiment différentes : orientations éloignées
         if all(min(abs(lp.bearing - p.bearing), 360 - abs(lp.bearing - p.bearing)) >= 90 for p in picked):
@@ -238,8 +279,33 @@ def to_map_png(loop: Loop, start: tuple[float, float]) -> bytes:
     return out.getvalue()
 
 
-def describe(loop: Loop) -> str:
-    parts = [f"{loop.km:.1f} km".replace(".", ","), f"{loop.safe * 100:.0f} % chemins et rues calmes"]
+def geocode(query: str, near: tuple[float, float] | None = None) -> tuple[str, float, float] | None:
+    """Lieu en texte libre → (nom court, lat, lon) via Nominatim, en privilégiant les environs de `near`."""
+    params = {"q": query, "format": "jsonv2", "limit": 1, "accept-language": "fr"}
+    if near:
+        lat, lon = near
+        params["viewbox"] = f"{lon - 0.3},{lat + 0.3},{lon + 0.3},{lat - 0.3}"   # préférence, pas une limite
+    res = requests.get(NOMINATIM_URL, params=params, timeout=settings.http_timeout, headers={"User-Agent": USER_AGENT})
+    res.raise_for_status()
+    hits = res.json()
+    if not hits:
+        return None
+    hit = hits[0]
+    name = hit.get("name") or (hit.get("display_name") or query).split(",")[0]
+    return name, float(hit["lat"]), float(hit["lon"])
+
+
+def describe(loop: Loop, surface: str = "mixte") -> str:
+    parts = [f"{loop.km:.1f} km".replace(".", ",")]
+    if surface == "route":
+        parts += [f"{loop.paved * 100:.0f} % bitume", f"{loop.safe * 100:.0f} % voies calmes",
+                  f"{loop.crossings} traversée{'s' if loop.crossings > 1 else ''}"]
+    elif surface == "nature":
+        parts.append(f"{(1 - loop.paved) * 100:.0f} % nature")
+    else:
+        parts.append(f"{loop.safe * 100:.0f} % chemins et rues calmes")
+    if loop.marked >= 0.15:
+        parts.append(f"{loop.marked * 100:.0f} % sur sentiers balisés")
     if loop.climb >= 20:
         parts.append(f"D+ {loop.climb} m")
     if loop.novelty is not None:

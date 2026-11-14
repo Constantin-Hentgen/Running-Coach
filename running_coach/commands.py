@@ -1,6 +1,7 @@
 """Commandes Telegram : texte d'aide et mises en forme des réponses instantanées (sans appel au modèle)."""
 import datetime
 import re
+from dataclasses import dataclass
 from itertools import groupby
 
 from telegram import BotCommand
@@ -33,7 +34,7 @@ COMMANDS = [
     ("stock", [], "Ce que tu as en cuisine"),
     ("nutrition", ["nutri"], "Ce que tu as mangé : calories, macros, bilan du jour et de la semaine"),
     ("routes", ["parcours"], "2-3 boucles de course autour de chez toi ou du boulot (carte + GPX)"),
-    ("newroute", [], "Une boucle que tu n'as jamais courue (carte + GPX)"),
+    ("newroute", [], "Une boucle jamais courue : distance, route/nature/mixte, lieu (carte + GPX)"),
     ("meme", [], "Un mème qui résume ta journée d'entraînement"),
     ("briefing", [], "Briefing IA complet et ajustement du programme"),
     ("help", ["start"], "Liste des commandes"),
@@ -62,8 +63,8 @@ HELP_TEXT = """🏃 *Salut, c'est __BOT_NAME__* 🤖
 /stock — ce que tu as en cuisine : les articles cochés sur ta liste y entrent, les plats que tu marques « mangé » ou « cuisiné » en sortent, et je te demande si les produits frais sont encore là quand ils arrivent à échéance
 /briefing — briefing complet, ajuste le programme dans l'agenda
 /meme — un mème qui résume ta journée d'entraînement 😂
-/routes — 2 ou 3 boucles autour du lieu de ta séance du jour, les plus calmes et sûres (carte + fichier GPX) ; /routes travail 8 pour choisir le lieu et la distance
-/newroute — une boucle que tu n'as jamais courue
+/routes — 2 ou 3 boucles autour du lieu de ta séance du jour, les plus calmes et sûres (carte + fichier GPX) ; /routes travail 8 nature pour choisir le lieu, la distance et le revêtement
+/newroute — une boucle jamais courue : /newroute 10 route bois de vincennes (distance, route / nature / mixte, lieu) ; ce qui manque, je te le demande
 /nutrition — ce que tu as mangé aujourd'hui et cette semaine : calories, protéines, glucides, lipides, et si tu manges assez pour ce que tu dépenses (table Ciqual)
 
 /help — cette aide
@@ -87,27 +88,80 @@ DEFAULT_ROUTE_KM = 6.0
 KM_IN_TITLE = re.compile(r"(\d+(?:[.,]\d+)?)\s*km", re.I)
 
 
-def route_request(args: list[str], places: list[tuple[str, float, float]], today_events: list[dict]) -> tuple:
-    """/routes [lieu] [km] → (nom du lieu, (lat, lon), km). Par défaut : le lieu et la distance de la séance du jour."""
+SURFACE_WORDS = {"route": "route", "routes": "route", "road": "route", "bitume": "route", "goudron": "route",
+                 "nature": "nature", "trail": "nature", "terrain": "nature", "chemin": "nature", "chemins": "nature",
+                 "sentier": "nature", "sentiers": "nature", "mixte": "mixte", "mixed": "mixte", "mix": "mixte"}
+FILLER_WORDS = {"à", "a", "au", "aux", "en", "de", "du", "des", "vers", "près", "pres", "depuis", "autour", "dans", "sur"}
+
+
+@dataclass
+class RouteAsk:
+    """Demande de boucle : chaque champ vaut None tant qu'il n'est ni donné ni déduit de l'agenda."""
+    place: tuple[str, float, float] | None = None   # lieu connu (WEATHER_LOCATIONS) ou géocodé
+    km: float | None = None
+    surface: str | None = None                      # route | nature | mixte
+    query: str = ""                                 # lieu en texte libre, à géocoder
+
+
+def parse_route_args(args: list[str], places: list[tuple[str, float, float]]) -> RouteAsk:
+    """« /newroute 10 route bois de vincennes » → distance, revêtement, et lieu (connu, ou texte libre à géocoder)."""
     by_name = {name.casefold(): (name, lat, lon) for name, lat, lon in places}
-    place, km = None, None
+    ask, words = RouteAsk(), []
     for a in args:
-        if a.casefold() in by_name:
-            place = by_name[a.casefold()]
+        low = a.casefold()
+        if low in by_name and ask.place is None:
+            ask.place = by_name[low]
+        elif low in SURFACE_WORDS and ask.surface is None:
+            ask.surface = SURFACE_WORDS[low]
         else:
             try:
-                km = float(a.replace(",", ".").lower().removesuffix("km"))
+                ask.km = float(low.replace(",", ".").removesuffix("km"))
             except ValueError:
-                pass
-    run = next((e for e in today_events if "🏃" in e.get("summary", "") or KM_IN_TITLE.search(e.get("summary", ""))), None)
+                words.append(a)
+    while words and words[0].casefold() in FILLER_WORDS:   # « à bois de vincennes » → « bois de vincennes »
+        words.pop(0)
+    ask.query = " ".join(words)
+    return ask
+
+
+def next_session(events: list[dict], now: datetime.datetime | None = None) -> dict | None:
+    """La prochaine séance de course (🏃 ou une distance en km dans le titre) pas encore terminée."""
+    for e in sorted(events, key=lambda e: e.get("start", "")):
+        if not ("🏃" in e.get("summary", "") or KM_IN_TITLE.search(e.get("summary", ""))):
+            continue
+        try:
+            if now and datetime.datetime.fromisoformat(e["end"]) <= now:
+                continue
+        except (KeyError, ValueError):
+            pass
+        return e
+    return None
+
+
+def fill_from_session(ask: RouteAsk, places: list[tuple[str, float, float]], events: list[dict],
+                      now: datetime.datetime | None = None) -> RouteAsk:
+    """Ce qui n'est pas donné vient de la prochaine séance : son lieu (connu, ou adresse à géocoder) et sa distance."""
+    by_name = {name.casefold(): (name, lat, lon) for name, lat, lon in places}
+    run = next_session(events, now)
     if run:
-        if place is None and run.get("location", "").casefold() in by_name:
-            place = by_name[run["location"].casefold()]
-        if km is None and (m := KM_IN_TITLE.search(run.get("summary", ""))):
-            km = float(m.group(1).replace(",", "."))
-    if place is None and places:
-        place = places[0]
-    km = min(max(km or DEFAULT_ROUTE_KM, 2.0), 30.0)
+        location = (run.get("location") or "").strip()
+        if ask.place is None and not ask.query and location:
+            if location.casefold() in by_name:
+                ask.place = by_name[location.casefold()]
+            else:
+                ask.query = location
+        if ask.km is None and (m := KM_IN_TITLE.search(run.get("summary", ""))):
+            ask.km = float(m.group(1).replace(",", "."))
+    if ask.km is not None:
+        ask.km = min(max(ask.km, 2.0), 30.0)
+    return ask
+
+
+def route_request(args: list[str], places: list[tuple[str, float, float]], today_events: list[dict]) -> tuple:
+    """/routes [lieu] [km] → (nom du lieu, (lat, lon), km). Par défaut : le lieu et la distance de la séance du jour."""
+    ask = fill_from_session(parse_route_args(args, places), places, today_events)
+    place = ask.place or (places[0] if places else None)
+    km = ask.km if ask.km is not None else DEFAULT_ROUTE_KM
     return (place[0], (place[1], place[2]), km) if place else (None, None, km)
 
 

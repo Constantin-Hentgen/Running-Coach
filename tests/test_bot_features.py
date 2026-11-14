@@ -1469,3 +1469,60 @@ def test_evening_nutrition_check_sends_once_only_when_something_is_off(tmp_path,
     assert b.sent[-1][0].strip() == "Demain, un vrai petit-déj 🥣"
     asyncio.run(b.check_nutrition())                                          # once a day
     assert len(asked) == 1
+
+
+def test_newroute_asks_surface_then_distance_with_buttons(tmp_path, monkeypatch):
+    from running_coach import routes
+    b, _ = _bot(tmp_path, monkeypatch)
+    places = [("Maison", 48.8, 2.3)]
+    monkeypatch.setattr(info, "settings", NS(weather_locations=places, dreeve_enabled=False))
+    monkeypatch.setattr(info.cs, "list_events", lambda a, b: ([], 0))
+    replies, sent = [], {}
+
+    async def reply_text(text, reply_markup=None, **kw):
+        replies.append((text, reply_markup))
+
+    async def reply_photo(img, caption=None):
+        sent["caption"] = caption
+
+    async def reply_document(doc, filename=None):
+        sent["file"] = filename
+
+    message = NS(reply_text=reply_text, reply_photo=reply_photo, reply_document=reply_document, text="",
+                 chat=NS(send_action=_noop))
+    asyncio.run(b.on_new_route(NS(message=message, effective_chat=NS(id=42)), NS(args=[])))
+    assert replies[-1][0].startswith("Tu veux courir sur quoi")
+    surface_btn = dict(_buttons(replies[-1][1]))["🛣️ Route"]
+
+    def click(data):
+        q = FakeQuery(data)
+        q.message = message
+        asyncio.run(b.on_button(NS(callback_query=q, effective_chat=NS(id=42), effective_message=None, message=None), None))
+        return q
+
+    click(surface_btn)
+    assert replies[-1][0].startswith("Combien de km")
+    km_btn = dict(_buttons(replies[-1][1]))["10 km"]
+    seen = {}
+
+    def fake_find(start, km, count, runs, never_done, surface):
+        seen.update(start=start, km=km, surface=surface, never_done=never_done)
+        return [routes.Loop(points=[(48.8, 2.3, None)], km=10.1, quiet=0.5, calm=0.5, busy=0.0, crossings=3)]
+
+    monkeypatch.setattr(info.routes, "find_loops", fake_find)
+    monkeypatch.setattr(info.routes, "to_map_png", lambda lp, start: b"img")
+    click(km_btn)
+    assert seen == {"start": (48.8, 2.3), "km": 10.0, "surface": "route", "never_done": True}
+    assert "3 traversées" in sent["caption"] and sent["file"].endswith(".gpx")
+    assert any("jamais faite" in t for t, _ in b.sent)
+    assert click(km_btn).answers == ["Demande expirée, relance /newroute"]   # déjà utilisé
+
+
+def test_newroute_unknown_place_says_so(tmp_path, monkeypatch):
+    b, _ = _bot(tmp_path, monkeypatch)
+    monkeypatch.setattr(info, "settings", NS(weather_locations=[("Maison", 48.8, 2.3)], dreeve_enabled=False))
+    monkeypatch.setattr(info.cs, "list_events", lambda a, b: ([], 0))
+    monkeypatch.setattr(info.routes, "geocode", lambda q, near: None)
+    message = NS(text="", chat=NS(send_action=_noop))
+    asyncio.run(b.on_new_route(NS(message=message, effective_chat=NS(id=42)), NS(args=["8", "nature", "lac", "imaginaire"])))
+    assert any("« lac imaginaire »" in t for t, _ in b.sent)

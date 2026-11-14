@@ -236,6 +236,8 @@ class CoachBot(InfoMixin, KitchenMixin, MealsMixin, RunsMixin, JobsMixin):
                 await self._on_eat_again(update)
             elif parts[0] == "k":
                 await self._on_pantry_check(update, parts[1] == "y", parts[2])
+            elif parts[0] == "r":
+                await self._on_route_button(update, parts[1], parts[2], parts[3])
             else:
                 await query.answer()
         except Exception:

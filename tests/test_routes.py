@@ -55,3 +55,75 @@ def test_backtrack_detects_out_and_back():
     loop = [(48.8 + 0.001 * i, 2.3, None) for i in range(40)] + [(48.8 + 0.001 * i, 2.31, None) for i in range(40)]
     out_and_back = [(48.8 + 0.001 * i, 2.3, None) for i in range(40)] + [(48.8 + 0.001 * i, 2.3, None) for i in range(39, -1, -1)]
     assert routes.backtrack(loop) < 0.05 < routes.backtrack(out_and_back)
+
+
+# --- /newroute : options, lieu, revêtement, traversées (#40) ------------------
+
+def test_parse_route_args_distance_surface_and_free_text_place():
+    ask = commands.parse_route_args(["10", "route", "à", "bois", "de", "vincennes"], PLACES)
+    assert (ask.km, ask.surface, ask.place, ask.query) == (10.0, "route", None, "bois de vincennes")
+    ask = commands.parse_route_args(["trail", "travail", "8km"], PLACES)
+    assert (ask.km, ask.surface, ask.place, ask.query) == (8.0, "nature", ("travail", 48.85, 2.35), "")
+    ask = commands.parse_route_args([], PLACES)
+    assert (ask.km, ask.surface, ask.place, ask.query) == (None, None, None, "")
+
+
+def test_fill_from_session_uses_next_session_place_or_address():
+    import datetime
+    from running_coach.config import TZ
+    now = datetime.datetime(2026, 11, 10, 12, 0, tzinfo=TZ)
+    done = {"summary": "🏃 Footing 5 km", "location": "maison", "start": "2026-11-10T07:00:00+01:00", "end": "2026-11-10T08:00:00+01:00"}
+    later = {"summary": "🏃 Sortie longue 14 km", "location": "Parc de Sceaux", "start": "2026-11-11T09:00:00+01:00",
+             "end": "2026-11-11T10:30:00+01:00"}
+    ask = commands.fill_from_session(commands.parse_route_args([], PLACES), PLACES, [done, later], now)
+    assert (ask.km, ask.query, ask.place) == (14.0, "Parc de Sceaux", None)     # séance passée ignorée ; adresse à géocoder
+    forced = commands.fill_from_session(commands.parse_route_args(["travail", "6"], PLACES), PLACES, [later], now)
+    assert (forced.km, forced.place[0], forced.query) == (6.0, "travail", "")    # ce qui est donné l'emporte
+
+
+def _brouter_response(rows):
+    header = ["Longitude", "Latitude", "Elevation", "Distance", "CostPerKm", "ElevCost", "TurnCost", "NodeCost",
+              "InitialCost", "WayTags", "NodeTags", "Time", "Energy"]
+    msgs = [header] + [["0", "0", "0", str(d), "0", "0", "0", "0", "0", way, node, "0", "0"] for d, way, node in rows]
+    return {"features": [{"geometry": {"coordinates": [[2.3, 48.8, 35], [2.31, 48.81, 36]]},
+                          "properties": {"track-length": "1000", "filtered ascend": "4", "messages": msgs}}]}
+
+
+def test_route_reads_surface_crossings_and_waymarked_share(monkeypatch):
+    rows = [(400, "highway=footway surface=asphalt", "highway=crossing crossing=traffic_signals"),
+            (300, "highway=path route_hiking_lwn=yes", ""),                     # sans surface : chemin = nature
+            (200, "highway=residential surface=gravel", "highway=traffic_signals"),
+            (100, "highway=residential", "kerb=lowered")]
+    monkeypatch.setattr(routes.requests, "get", lambda *a, **k: NS(raise_for_status=lambda: None,
+                                                                   json=lambda: _brouter_response(rows)))
+    lp = routes.route([(48.8, 2.3), (48.81, 2.31)])
+    assert lp.km == 1.0 and lp.crossings == 2
+    assert round(lp.paved, 2) == 0.5 and round(lp.marked, 2) == 0.3
+
+
+def test_score_follows_wanted_surface_and_describe():
+    pts = [(48.8 + 0.001 * i, 2.3, None) for i in range(40)] + [(48.8 + 0.001 * i, 2.31, None) for i in range(40)]
+    road = routes.Loop(points=pts, km=6, quiet=0.3, calm=0.6, busy=0.0, paved=1.0, crossings=6)
+    trail = routes.Loop(points=pts, km=6, quiet=0.8, calm=0.1, busy=0.0, paved=0.1, crossings=1, marked=0.5)
+    assert road.score(6, "route") > trail.score(6, "route")
+    assert trail.score(6, "nature") > road.score(6, "nature")
+    busy_crossings = routes.Loop(points=pts, km=6, quiet=0.3, calm=0.6, busy=0.0, paved=1.0, crossings=60)
+    assert road.score(6, "route") > busy_crossings.score(6, "route")              # moins de traversées
+    assert routes.describe(road, "route") == "6,0 km · 100 % bitume · 90 % voies calmes · 6 traversées"
+    assert routes.describe(trail, "nature") == "6,0 km · 90 % nature · 50 % sur sentiers balisés"
+
+
+def test_find_loops_drops_out_and_back_when_a_real_loop_exists(monkeypatch):
+    def fake_loop_at(start, km, bearing):
+        out = [(48.8 + 0.001 * i, 2.3, None) for i in range(40)]
+        pts = out + out[::-1] if bearing == 0 else out + [(48.8 + 0.001 * i, 2.31, None) for i in range(40)]
+        lp = routes.Loop(points=pts, km=km, quiet=1.0 if bearing == 0 else 0.4, calm=0.0, busy=0.0)
+        lp.bearing = bearing
+        return lp
+
+    monkeypatch.setattr(routes, "loop_at", fake_loop_at)
+    loops = routes.find_loops((48.8, 2.3), 6, 3)
+    assert loops and all(lp.bearing != 0 for lp in loops)   # l'aller-retour, pourtant le plus calme, est écarté
+
+
+from types import SimpleNamespace as NS  # noqa: E402

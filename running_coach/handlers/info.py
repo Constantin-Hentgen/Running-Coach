@@ -3,8 +3,9 @@ import asyncio
 import dataclasses
 import datetime
 import logging
+from types import SimpleNamespace
 
-from telegram import InputMediaDocument, InputMediaPhoto, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, InputMediaDocument, InputMediaPhoto, Update
 from telegram.ext import ContextTypes
 
 from .. import agent, commands, dreeve, routes, weather
@@ -15,6 +16,8 @@ from ..memory import store
 from .ui import send_text
 
 logger = logging.getLogger(__name__)
+
+ROUTE_KM_CHOICES = (5, 8, 10, 12, 15)
 
 
 class InfoMixin:
@@ -64,29 +67,99 @@ class InfoMixin:
         await self._command(update, lambda: commands.format_goals_reply(store.goals, datetime.datetime.now(TZ).date()))
 
     async def on_routes(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        await self._send_routes(update, context.args or [], never_done=False)
-
-    async def on_new_route(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        await self._send_routes(update, context.args or [], never_done=True)
-
-    async def _send_routes(self, update: Update, args: list[str], never_done: bool) -> None:
-        """Boucles autour du lieu de la séance : un album de cartes, puis un album de fichiers GPX."""
         if not update.message or not await self._authorized(update):
             return
+        ask = commands.parse_route_args(context.args or [], settings.weather_locations)
+        ask.surface = ask.surface or "mixte"
+        await self._route_flow(update.message, ask, never_done=False)
+
+    async def on_new_route(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """/newroute [km] [route|nature|mixte] [lieu en texte libre] : ce qui manque est demandé par boutons."""
+        if not update.message or not await self._authorized(update):
+            return
+        await self._route_flow(update.message, commands.parse_route_args(context.args or [], settings.weather_locations),
+                               never_done=True)
+
+    def _route_asks(self) -> dict:
+        return self.__dict__.setdefault("_route_asks_store", {})
+
+    async def _route_flow(self, message, ask: "commands.RouteAsk", never_done: bool, filled: bool = False) -> None:
+        """Complète la demande (agenda, puis boutons pour le revêtement et la distance), puis envoie les boucles."""
         if not settings.weather_locations:
             await self._push("Il me faut tes lieux (WEATHER_LOCATIONS, ex. maison et travail) pour trouver des boucles 😅")
             return
-        typing = asyncio.create_task(self._keep_typing(update))
-        try:
+        if not filled:
             now = datetime.datetime.now(TZ)
             day = now.replace(hour=0, minute=0, second=0, microsecond=0)
-            try:
-                events = (await asyncio.to_thread(cs.list_events, day, day + datetime.timedelta(days=1)))[0]
+            try:   # la prochaine séance, aujourd'hui ou demain
+                events = (await asyncio.to_thread(cs.list_events, day, day + datetime.timedelta(days=2)))[0]
             except Exception:
                 events = []
-            name, start, km = commands.route_request(args, settings.weather_locations, events)
+            ask = commands.fill_from_session(ask, settings.weather_locations, events, now)
+        asks = self._route_asks()
+        if never_done and (ask.surface is None or ask.km is None):   # /routes garde ses valeurs par défaut
+            token = str(max((int(k) for k in asks), default=0) + 1)
+            asks[token] = ask
+            while len(asks) > 20:   # quelques demandes en attente au plus
+                asks.pop(next(iter(asks)))
+            if ask.surface is None:
+                text, buttons = "Tu veux courir sur quoi ? 👟", [
+                    InlineKeyboardButton("🛣️ Route", callback_data=f"r:s:{token}:route"),
+                    InlineKeyboardButton("🌲 Nature", callback_data=f"r:s:{token}:nature"),
+                    InlineKeyboardButton("🔀 Mixte", callback_data=f"r:s:{token}:mixte")]
+            else:
+                text, buttons = "Combien de km ? 📏", [InlineKeyboardButton(f"{k} km", callback_data=f"r:k:{token}:{k}")
+                                                       for k in ROUTE_KM_CHOICES]
+            await message.reply_text(text, reply_markup=InlineKeyboardMarkup([buttons]))
+            return
+        await self._send_routes(message, ask, never_done)
+
+    async def _on_route_button(self, update: Update, kind: str, token: str, value: str) -> None:
+        query = update.callback_query
+        ask = self._route_asks().pop(token, None)
+        if ask is None:
+            await query.answer("Demande expirée, relance /newroute")
+            return
+        await query.answer()
+        if kind == "s" and value in routes.SURFACES:
+            ask.surface = value
+            label = {"route": "🛣️ Route", "nature": "🌲 Nature", "mixte": "🔀 Mixte"}[value]
+        else:
+            ask.km = min(max(float(value), 2.0), 30.0)
+            label = f"{value} km"
+        try:
+            await query.edit_message_text(f"{query.message.text} → {label}")
+        except Exception:
+            logger.debug("Choix de boucle : message non modifié", exc_info=True)
+        await self._route_flow(query.message, ask, never_done=True, filled=True)
+
+    async def _send_routes(self, message, ask: "commands.RouteAsk", never_done: bool) -> None:
+        """Boucles autour du lieu demandé : un album de cartes, puis un album de fichiers GPX."""
+        typing = asyncio.create_task(self._keep_typing(SimpleNamespace(effective_chat=message.chat)))
+        loops, maps = [], []
+        try:
+            name, start = None, None
+            if ask.place:
+                name, start = ask.place[0], (ask.place[1], ask.place[2])
+            elif ask.query:
+                home = settings.weather_locations[0]
+                try:
+                    hit = await asyncio.to_thread(routes.geocode, ask.query, (home[1], home[2]))
+                except Exception as e:
+                    logger.warning(f"Géocodage de « {ask.query} » impossible : {e}")
+                    hit = None
+                if hit is None:
+                    await self._push(f"Je trouve pas « {ask.query} » sur la carte 🤔 Essaie avec la ville, "
+                                     "genre « bois de vincennes paris »")
+                    return
+                name, start = hit[0], (hit[1], hit[2])
+            else:
+                home = settings.weather_locations[0]
+                name, start = home[0], (home[1], home[2])
+            km = ask.km if ask.km is not None else commands.DEFAULT_ROUTE_KM
             runs = await asyncio.to_thread(dreeve.get_all_runs) if never_done and settings.dreeve_enabled else []
-            loops = await asyncio.to_thread(routes.find_loops, start, km, 1 if never_done else 3, runs, never_done)
+            loops = await asyncio.to_thread(routes.find_loops, start, km, 1 if never_done else 3, runs, never_done,
+                                            ask.surface or "mixte")
             maps = [await asyncio.to_thread(routes.to_map_png, lp, start) for lp in loops]
         except Exception:
             logger.exception("Boucles en échec")
@@ -96,24 +169,27 @@ class InfoMixin:
         if not loops:
             await self._push("J'ai pas réussi à tracer de boucle là, réessaie dans un moment 🥲")
             return
+        surface = ask.surface or "mixte"
+        kind = {"route": " sur route", "nature": " nature", "mixte": ""}[surface]
         if never_done and loops[0].novelty is not None and loops[0].novelty < routes.NEVER_DONE_MIN:
-            intro = f"Pas trouvé de boucle 100 % inédite vers {name}, voilà la plus nouvelle 👇"
+            intro = f"Pas trouvé de boucle{kind} 100 % inédite vers {name}, voilà la plus nouvelle 👇"
         else:
-            intro = (f"Une boucle jamais faite depuis {name} 👀" if never_done
-                     else f"{len(loops)} boucles de ~{km:g} km depuis {name} 👇").replace(".", ",")
+            intro = (f"Une boucle{kind} jamais faite depuis {name} 👀" if never_done
+                     else f"{len(loops)} boucles{kind} de ~{km:g} km depuis {name} 👇").replace(".", ",")
         await self._push(intro)
-        photos = [InputMediaPhoto(img, caption=f"{i}. {routes.describe(lp)}" + (" · © OpenStreetMap" if i == 1 else ""))
+        photos = [InputMediaPhoto(img, caption=f"{i}. {routes.describe(lp, surface)}" + (" · © OpenStreetMap" if i == 1 else ""))
                   for i, (lp, img) in enumerate(zip(loops, maps), 1)]
-        docs = [InputMediaDocument(routes.to_gpx(lp, f"Boucle {i} · {lp.km:.1f} km · {name}"),
-                                   filename=f"boucle-{i}-{lp.km:.1f}km.gpx".replace(".", ",", 1).replace(",gpx", ".gpx"))
-                for i, lp in enumerate(loops, 1)]
+        gpx = [(routes.to_gpx(lp, f"Boucle {i} · {lp.km:.1f} km · {name}"),
+                f"boucle-{i}-{lp.km:.1f}km.gpx".replace(".", ",", 1).replace(",gpx", ".gpx"))
+               for i, lp in enumerate(loops, 1)]
+        docs = [InputMediaDocument(data, filename=filename) for data, filename in gpx]
         try:
             if len(photos) == 1:
-                await update.message.reply_photo(maps[0], caption=photos[0].caption)
-                await update.message.reply_document(docs[0].media, filename=docs[0].filename)
+                await message.reply_photo(maps[0], caption=photos[0].caption)
+                await message.reply_document(gpx[0][0], filename=gpx[0][1])   # InputMediaDocument n'expose pas filename
             else:
-                await update.message.reply_media_group(photos)
-                await update.message.reply_media_group(docs)
+                await message.reply_media_group(photos)
+                await message.reply_media_group(docs)
         except Exception:
             logger.exception("Envoi des boucles en échec")
             await self._push("Les boucles sont prêtes mais Telegram n'a pas voulu les prendre 🥲 Réessaie ?")
