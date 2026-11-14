@@ -7,18 +7,46 @@
       "include-component-in-tag": false,
       "changelog-path": "CHANGELOG.md",
       "changelog-sections": [
-        {"type": "feat", "section": "Added"},
-        {"type": "fix", "section": "Fixed"},
-        {"type": "perf", "section": "Changed"},
-        {"type": "refactor", "section": "Changed"},
-        {"type": "revert", "section": "Removed"},
-        {"type": "docs", "section": "Documentation", "hidden": true},
-        {"type": "test", "section": "Tests", "hidden": true},
-        {"type": "ci", "section": "CI", "hidden": true},
-        {"type": "chore", "section": "Miscellaneous", "hidden": true}
-      ],
-      "extra-files": [
-        {"type": "toml", "path": "uv.lock", "jsonpath": "$.package[?(@.name=='running-coach-agent')].version"}
+        {
+          "type": "feat",
+          "section": "Added"
+        },
+        {
+          "type": "fix",
+          "section": "Fixed"
+        },
+        {
+          "type": "perf",
+          "section": "Changed"
+        },
+        {
+          "type": "refactor",
+          "section": "Changed"
+        },
+        {
+          "type": "revert",
+          "section": "Removed"
+        },
+        {
+          "type": "docs",
+          "section": "Documentation",
+          "hidden": true
+        },
+        {
+          "type": "test",
+          "section": "Tests",
+          "hidden": true
+        },
+        {
+          "type": "ci",
+          "section": "CI",
+          "hidden": true
+        },
+        {
+          "type": "chore",
+          "section": "Miscellaneous",
+          "hidden": true
+        }
       ]
     }
   }
